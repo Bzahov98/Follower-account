@@ -1,0 +1,8 @@
+{
+  "name": "Remix InstaTracker - with scubbing",
+  "description": "A local web application to parse Instagram JSON and ZIP export data, track followers, non-followers, and unfollowers, with an interactive step-by-step export guide.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
