@@ -163,16 +163,18 @@ export const api = {
     return handleResponse<{ followersParsed: number; followingParsed: number }>(res, 'Pasting JSON failed');
   },
   
-  getAccountData: async (id: string): Promise<{ stats: AccountStats; lists: Record<string, UserRecord[]> }> => {
+  getAccountData: async (id: string): Promise<{ stats: AccountStats; lists: Record<string, UserRecord[]>; allTags: string[] }> => {
     const res = await fetch(`/api/accounts/${id}/data`);
-    return handleResponse<{ stats: AccountStats; lists: Record<string, UserRecord[]> }>(res, 'Failed to fetch account data');
+    return handleResponse<{ stats: AccountStats; lists: Record<string, UserRecord[]>; allTags: string[] }>(res, 'Failed to fetch account data');
   },
 
   updateUserNotes: async (accountId: string, username: string, notes?: string, tags?: string[]): Promise<any> => {
+    const cleanNotes = typeof notes === 'string' ? notes : '';
+    const cleanTags = Array.isArray(tags) ? tags.filter((t): t is string => typeof t === 'string') : [];
     const res = await fetch(`/api/accounts/${accountId}/contacts/${encodeURIComponent(username)}/notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notes, tags })
+      body: JSON.stringify({ notes: cleanNotes, tags: cleanTags })
     });
     return handleResponse<any>(res, 'Failed to update contact notes');
   },
@@ -181,7 +183,7 @@ export const api = {
     const res = await fetch(`/api/accounts/${accountId}/contacts/${encodeURIComponent(username)}/manual-remove`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action })
+      body: JSON.stringify({ action: action === 'unmark' ? 'unmark' : 'remove' })
     });
     return handleResponse<{ success: boolean; manuallyRemoved: boolean; tags: string[] }>(res, 'Failed to toggle manual removal');
   },
@@ -190,7 +192,7 @@ export const api = {
     const res = await fetch(`/api/accounts/${accountId}/contacts/${encodeURIComponent(username)}/manual-missing`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action })
+      body: JSON.stringify({ action: action === 'unmark' ? 'unmark' : 'missing' })
     });
     return handleResponse<{ success: boolean; manuallyMissing: boolean; tags: string[] }>(res, 'Failed to toggle manual missing status');
   },
@@ -199,7 +201,7 @@ export const api = {
     const res = await fetch(`/api/accounts/${accountId}/clear-data`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deleteProfile })
+      body: JSON.stringify({ deleteProfile: Boolean(deleteProfile) })
     });
     return handleResponse<{ success: boolean }>(res, 'Failed to clear account data');
   },

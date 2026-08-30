@@ -55,6 +55,7 @@ export interface AccountHistory {
   all_known_users?: Record<string, UserRecord>; // master permanent retention directory
   user_notes?: Record<string, string>; // username -> notes
   user_tags?: Record<string, string[]>; // username -> tags
+  all_known_tags?: string[]; // master permanent tags registry
 }
 
 export interface AccountStats {
@@ -98,7 +99,7 @@ export interface UnifiedContactRecord {
   events: HistoryEvent[];
 }
 
-export interface UnifiedAccountBackup {
+  export interface UnifiedAccountBackup {
   id: string;
   name: string;
   created_at: string;
@@ -106,6 +107,7 @@ export interface UnifiedAccountBackup {
   export_folder_name?: string | null;
   stats?: AccountStats;
   contacts: Record<string, UnifiedContactRecord>;
+  tags?: Record<string, string[]>;
 }
 
 export interface UnifiedDatabaseBackup {

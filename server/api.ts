@@ -696,12 +696,23 @@ export async function buildUnifiedAccountBackup(accountId: string): Promise<Unif
     };
   }
 
+  // Build a comprehensive, deduplicated tags map for all contacts
+  const unifiedTags: Record<string, string[]> = { ...(history.user_tags || {}) };
+  for (const [u, record] of Object.entries(contacts)) {
+    if (record.tags && record.tags.length > 0) {
+      const existingTags = unifiedTags[u] || [];
+      const combined = Array.from(new Set([...existingTags, ...record.tags]));
+      unifiedTags[u] = combined;
+    }
+  }
+
   return {
     id: account.id,
     name: account.name,
     created_at: account.created_at,
     last_updated: account.last_updated,
     export_folder_name: account.export_folder_name,
+    tags: unifiedTags,
     contacts
   };
 }
@@ -792,8 +803,16 @@ export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, t
       existing.last_seen || existingHistory?.followers?.[username]?.last_seen
     );
 
-    // Merge tags
+    // Merge tags from contact and backup.tags
+    const backupTagsForUser = (backup.tags && typeof backup.tags === 'object') ? (backup.tags[username] || backup.tags[usernameKey] || []) : [];
     const incomingTags = Array.isArray(contact.tags) ? [...contact.tags] : [];
+    if (Array.isArray(backupTagsForUser)) {
+      backupTagsForUser.forEach(t => {
+        if (typeof t === 'string' && !incomingTags.includes(t)) {
+          incomingTags.push(t);
+        }
+      });
+    }
     if (contact.is_missing && !incomingTags.includes('manually_missing')) {
       incomingTags.push('manually_missing');
     }
@@ -929,6 +948,17 @@ export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, t
       delete history.favorites[username];
     }
   }
+
+  // Refresh and deduplicate all known tags registry
+  const allKnownTagsSet = new Set(history.all_known_tags || []);
+  Object.values(history.user_tags || {}).forEach(tagList => {
+    if (Array.isArray(tagList)) {
+      tagList.forEach(t => {
+        if (typeof t === 'string' && t.trim()) allKnownTagsSet.add(t.trim().toLowerCase());
+      });
+    }
+  });
+  history.all_known_tags = Array.from(allKnownTagsSet);
 
   await saveAccountHistory(account.id, history);
   return account;
@@ -1543,36 +1573,44 @@ router.post('/accounts/:id/contacts/:username/notes', async (req, res) => {
       history.user_notes[username] = notes;
     }
     if (Array.isArray(tags)) {
-      history.user_tags[username] = tags;
+      const cleanTags = tags
+        .filter(t => typeof t === 'string')
+        .map(t => t.trim().toLowerCase().replace(/^#/, ''))
+        .filter(Boolean);
+
+      history.user_tags[username] = [...cleanTags];
       // Update global tags registry
       if (!history.all_known_tags) history.all_known_tags = [];
-      tags.forEach(tag => {
+      cleanTags.forEach(tag => {
         if (!history.all_known_tags!.includes(tag)) {
           history.all_known_tags!.push(tag);
         }
       });
+
+      // Update in all lists if present
+      if (history.followers[username]) {
+        history.followers[username].tags = [...cleanTags];
+      }
+      if (history.following[username]) {
+        history.following[username].tags = [...cleanTags];
+      }
+      if (history.unfollowed_by_you?.[username]) {
+        history.unfollowed_by_you[username].tags = [...cleanTags];
+      }
+      if (history.all_known_users?.[username]) {
+        history.all_known_users[username].tags = [...cleanTags];
+      }
     }
 
-    // Update in all lists if present
-    if (history.followers[username]) {
-      if (typeof notes === 'string') history.followers[username].notes = notes;
-      if (Array.isArray(tags)) history.followers[username].tags = tags;
-    }
-    if (history.following[username]) {
-      if (typeof notes === 'string') history.following[username].notes = notes;
-      if (Array.isArray(tags)) history.following[username].tags = tags;
-    }
-    if (history.unfollowed_by_you?.[username]) {
-      if (typeof notes === 'string') history.unfollowed_by_you[username].notes = notes;
-      if (Array.isArray(tags)) history.unfollowed_by_you[username].tags = tags;
-    }
-    if (history.all_known_users?.[username]) {
-      if (typeof notes === 'string') history.all_known_users[username].notes = notes;
-      if (Array.isArray(tags)) history.all_known_users[username].tags = tags;
+    if (typeof notes === 'string') {
+      if (history.followers[username]) history.followers[username].notes = notes;
+      if (history.following[username]) history.following[username].notes = notes;
+      if (history.unfollowed_by_you?.[username]) history.unfollowed_by_you[username].notes = notes;
+      if (history.all_known_users?.[username]) history.all_known_users[username].notes = notes;
     }
 
     await saveAccountHistory(req.params.id, history);
-    res.json({ success: true, notes: history.user_notes[username], tags: history.user_tags[username] });
+    res.json({ success: true, notes: history.user_notes[username] || '', tags: history.user_tags[username] || [] });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

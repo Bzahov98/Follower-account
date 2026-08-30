@@ -38,7 +38,13 @@ export async function getAccountHistory(id: string): Promise<AccountHistory> {
 }
 
 export async function saveAccountHistory(id: string, history: AccountHistory): Promise<void> {
-  await fs.writeFile(path.join(DATA_DIR, `account_${id}_history.json`), JSON.stringify(history, null, 2));
+  const filePath = path.join(DATA_DIR, `account_${id}_history.json`);
+  try {
+    await fs.writeFile(filePath, JSON.stringify(history, null, 2));
+  } catch (err: any) {
+    console.error(`Failed to serialize and save history for account ${id}:`, err);
+    throw err;
+  }
 }
 
 export async function deleteAccountHistory(id: string): Promise<void> {

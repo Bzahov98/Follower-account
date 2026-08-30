@@ -58,10 +58,14 @@ export default function ContactDetailModal({
 
   if (!isOpen || !user) return null;
 
-  const handleSaveNotes = async (currentTags = tags) => {
+  const handleSaveNotes = async (customTags?: string[] | unknown) => {
     setSaving(true);
     try {
-      await api.updateUserNotes(accountId, user.username, notes, currentTags);
+      // Ensure customTags is strictly an array of strings, otherwise fallback to state tags
+      const tagsToSave = Array.isArray(customTags)
+        ? customTags.filter((t): t is string => typeof t === 'string')
+        : tags;
+      await api.updateUserNotes(accountId, user.username, notes, tagsToSave);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2000);
       onUpdate();
@@ -451,7 +455,7 @@ export default function ContactDetailModal({
               Close
             </button>
             <button
-              onClick={handleSaveNotes}
+              onClick={() => handleSaveNotes()}
               disabled={saving}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
