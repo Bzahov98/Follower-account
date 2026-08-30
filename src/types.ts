@@ -106,8 +106,9 @@ export interface UnifiedContactRecord {
   last_updated: string | null;
   export_folder_name?: string | null;
   stats?: AccountStats;
+  /** Deduplicated list of all unique tags used across this profile for searching/filtering */
+  tags?: string[] | Record<string, string[]>;
   contacts: Record<string, UnifiedContactRecord>;
-  tags?: Record<string, string[]>;
 }
 
 export interface UnifiedDatabaseBackup {

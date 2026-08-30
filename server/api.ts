@@ -696,15 +696,33 @@ export async function buildUnifiedAccountBackup(accountId: string): Promise<Unif
     };
   }
 
-  // Build a comprehensive, deduplicated tags map for all contacts
-  const unifiedTags: Record<string, string[]> = { ...(history.user_tags || {}) };
-  for (const [u, record] of Object.entries(contacts)) {
-    if (record.tags && record.tags.length > 0) {
-      const existingTags = unifiedTags[u] || [];
-      const combined = Array.from(new Set([...existingTags, ...record.tags]));
-      unifiedTags[u] = combined;
+  // Collect a sorted, deduplicated list of all unique tags used across this profile.
+  // This provides a clean, searchable list of tags at the account level,
+  // while each contact retains their own specific tags inside contacts[username].tags.
+  const profileTagsSet = new Set<string>();
+  if (Array.isArray(history.all_known_tags)) {
+    history.all_known_tags.forEach(t => {
+      if (typeof t === 'string' && t.trim()) profileTagsSet.add(t.trim().toLowerCase());
+    });
+  }
+  if (history.user_tags && typeof history.user_tags === 'object') {
+    Object.values(history.user_tags).forEach(tagList => {
+      if (Array.isArray(tagList)) {
+        tagList.forEach(t => {
+          if (typeof t === 'string' && t.trim()) profileTagsSet.add(t.trim().toLowerCase());
+        });
+      }
+    });
+  }
+  for (const record of Object.values(contacts)) {
+    if (Array.isArray(record.tags)) {
+      record.tags.forEach(t => {
+        if (typeof t === 'string' && t.trim()) profileTagsSet.add(t.trim().toLowerCase());
+      });
     }
   }
+
+  const profileTags = Array.from(profileTagsSet).sort();
 
   return {
     id: account.id,
@@ -712,7 +730,7 @@ export async function buildUnifiedAccountBackup(accountId: string): Promise<Unif
     created_at: account.created_at,
     last_updated: account.last_updated,
     export_folder_name: account.export_folder_name,
-    tags: unifiedTags,
+    tags: profileTags,
     contacts
   };
 }
@@ -803,8 +821,10 @@ export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, t
       existing.last_seen || existingHistory?.followers?.[username]?.last_seen
     );
 
-    // Merge tags from contact and backup.tags
-    const backupTagsForUser = (backup.tags && typeof backup.tags === 'object') ? (backup.tags[username] || backup.tags[usernameKey] || []) : [];
+    // Merge tags from contact and (if legacy format) backup.tags dictionary
+    const backupTagsForUser = (backup.tags && typeof backup.tags === 'object' && !Array.isArray(backup.tags))
+      ? (backup.tags[username] || backup.tags[usernameKey] || [])
+      : [];
     const incomingTags = Array.isArray(contact.tags) ? [...contact.tags] : [];
     if (Array.isArray(backupTagsForUser)) {
       backupTagsForUser.forEach(t => {
@@ -951,6 +971,11 @@ export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, t
 
   // Refresh and deduplicate all known tags registry
   const allKnownTagsSet = new Set(history.all_known_tags || []);
+  if (Array.isArray(backup.tags)) {
+    backup.tags.forEach(t => {
+      if (typeof t === 'string' && t.trim()) allKnownTagsSet.add(t.trim().toLowerCase());
+    });
+  }
   Object.values(history.user_tags || {}).forEach(tagList => {
     if (Array.isArray(tagList)) {
       tagList.forEach(t => {
@@ -958,7 +983,7 @@ export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, t
       });
     }
   });
-  history.all_known_tags = Array.from(allKnownTagsSet);
+  history.all_known_tags = Array.from(allKnownTagsSet).sort();
 
   await saveAccountHistory(account.id, history);
   return account;

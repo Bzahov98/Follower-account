@@ -325,9 +325,12 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
 
   // Apply Search, Tag, Removed, Seen Filter & Sort
   const filteredList = rawActiveList.filter(user => {
-    const matchesSearch = searchQuery === '' || 
-      user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (user.notes && user.notes.toLowerCase().includes(searchQuery.toLowerCase()));
+    const cleanSearch = searchQuery.trim().toLowerCase();
+    const searchNoHash = cleanSearch.replace(/^#/, '');
+    const matchesSearch = cleanSearch === '' || 
+      user.username.toLowerCase().includes(cleanSearch) ||
+      (user.notes && user.notes.toLowerCase().includes(cleanSearch)) ||
+      (user.tags && user.tags.some(t => t.toLowerCase().includes(searchNoHash)));
     
     const matchesTag = selectedTagFilter === 'all' ||
       (user.tags && user.tags.includes(selectedTagFilter));
@@ -677,16 +680,30 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
                 </button>
 
                 {allUniqueTags.length > 0 && (
-                  <select
-                    value={selectedTagFilter}
-                    onChange={(e) => setSelectedTagFilter(e.target.value)}
-                    className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700"
-                  >
-                    <option value="all">Tags: All</option>
-                    {allUniqueTags.map(t => (
-                      <option key={t} value={t}>#{t}</option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={selectedTagFilter}
+                      onChange={(e) => setSelectedTagFilter(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700"
+                    >
+                      <option value="all">Tags: All ({allUniqueTags.length})</option>
+                      {allUniqueTags.map(t => (
+                        <option key={t} value={t}>#{t}</option>
+                      ))}
+                    </select>
+
+                    {selectedTagFilter !== 'all' && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTagFilter('all')}
+                        className="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                        title="Reset tag filter to All"
+                      >
+                        <span>#{selectedTagFilter}</span>
+                        <span className="font-bold">×</span>
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 <select value={filterRemoved} onChange={(e) => setFilterRemoved(e.target.value as any)} className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700">
@@ -826,9 +843,22 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
                               )}
 
                               {hasTags && user.tags?.map(t => (
-                                <span key={t} className="text-[10px] bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded">
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTagFilter(prev => prev === t ? 'all' : t);
+                                  }}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                                    selectedTagFilter === t
+                                      ? 'bg-purple-600 text-white border-purple-700 font-bold shadow-xs'
+                                      : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                                  }`}
+                                  title={selectedTagFilter === t ? `Clear filter #${t}` : `Filter by tag #${t}`}
+                                >
                                   #{t}
-                                </span>
+                                </button>
                               ))}
                             </div>
 
