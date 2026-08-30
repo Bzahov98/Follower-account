@@ -13,10 +13,14 @@ import {
   Sparkles, 
   Archive,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Database,
+  Download,
+  FileJson
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { api } from '../lib/api';
+import ImportDatabaseModal from './ImportDatabaseModal';
 
 interface DashboardProps {
   accounts: Account[];
@@ -42,6 +46,7 @@ export default function Dashboard({
   const [uploadingFolder, setUploadingFolder] = useState(false);
   const [folderUploadError, setFolderUploadError] = useState<string | null>(null);
   const [folderUploadSuccess, setFolderUploadSuccess] = useState<string | null>(null);
+  const [isImportDbOpen, setIsImportDbOpen] = useState(false);
 
   const folderInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
@@ -275,12 +280,35 @@ export default function Dashboard({
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Export Local JSON Database (All Accounts) */}
+            <a
+              id="dashboard-export-database-btn"
+              href={api.exportDatabaseUrl}
+              download
+              className="text-xs text-purple-700 bg-purple-50 hover:bg-purple-100 font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-purple-200 transition-colors shadow-xs cursor-pointer"
+              title="Export all accounts and contacts into a single JSON database file"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export JSON Database
+            </a>
+
+            {/* Import Local JSON Database */}
+            <button
+              id="dashboard-import-database-btn"
+              onClick={() => setIsImportDbOpen(true)}
+              className="text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-200 transition-colors shadow-xs cursor-pointer"
+              title="Import or restore a unified JSON database backup"
+            >
+              <Database className="w-3.5 h-3.5" />
+              Import JSON Database
+            </button>
+
             {accounts.length > 0 && onOpenClearData && (
               <button
                 id="dashboard-clear-all-data-btn"
                 onClick={onOpenClearData}
-                className="text-xs text-red-600 hover:text-red-700 font-semibold flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-red-200 hover:bg-red-50 transition-colors cursor-pointer"
+                className="text-xs text-red-600 hover:text-red-700 font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-red-200 hover:bg-red-50 transition-colors cursor-pointer"
                 title="Clear local database and storage"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -356,6 +384,16 @@ export default function Dashboard({
           </div>
         )}
       </div>
+
+      {/* Database Import Modal */}
+      <ImportDatabaseModal
+        isOpen={isImportDbOpen}
+        onClose={() => setIsImportDbOpen(false)}
+        onSuccess={() => {
+          onRefreshList();
+          setFolderUploadSuccess('Database successfully restored from JSON backup!');
+        }}
+      />
     </div>
   );
 }

@@ -144,6 +144,42 @@ export const api = {
     });
     if (!res.ok) throw new Error('Failed to clear all local data');
     return res.json();
+  },
+
+  // Export full unified JSON database across all accounts
+  exportDatabaseUrl: '/api/database/export',
+
+  // Export single account unified JSON database
+  getAccountExportDatabaseUrl: (accountId: string) => `/api/accounts/${accountId}/export-database`,
+
+  // Import unified JSON database backup file
+  importDatabaseFile: async (file: File): Promise<{ success: boolean; message: string; importedAccounts?: any[]; totalContactsImported?: number }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch('/api/database/import', {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Database import failed' }));
+      throw new Error(err.error || 'Failed to import JSON database');
+    }
+    return res.json();
+  },
+
+  // Import unified JSON database directly into specific account
+  importAccountDatabaseFile: async (accountId: string, file: File): Promise<{ success: boolean; message: string; account?: any; contactsCount?: number }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`/api/accounts/${accountId}/import-database`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Account database import failed' }));
+      throw new Error(err.error || 'Failed to import database into account');
+    }
+    return res.json();
   }
 };
 

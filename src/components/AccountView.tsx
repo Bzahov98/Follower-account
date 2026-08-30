@@ -24,10 +24,13 @@ import {
   Filter, 
   Check, 
   Trash2,
-  FileQuestion
+  FileQuestion,
+  Database,
+  Download
 } from 'lucide-react';
 import { format } from 'date-fns';
 import ContactDetailModal from './ContactDetailModal';
+import ImportDatabaseModal from './ImportDatabaseModal';
 
 interface AccountViewProps {
   account: Account;
@@ -61,6 +64,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('all');
   const [selectedContact, setSelectedContact] = useState<UserRecord | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [isImportDbOpen, setIsImportDbOpen] = useState(false);
   const [actionLoadingUser, setActionLoadingUser] = useState<string | null>(null);
 
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -345,6 +349,29 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
         </div>
         
         <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Export Unified Database for this Account */}
+          <a
+            id="account-view-export-database-btn"
+            href={api.getAccountExportDatabaseUrl(account.id)}
+            download
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 transition-colors shadow-xs cursor-pointer"
+            title="Export this account and all contacts into a single JSON database file"
+          >
+            <Download className="w-3.5 h-3.5 text-purple-600" />
+            Export JSON Database
+          </a>
+
+          {/* Import Unified Database for this Account */}
+          <button
+            id="account-view-import-database-btn"
+            onClick={() => setIsImportDbOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors shadow-xs cursor-pointer"
+            title="Import a JSON database backup directly into this account"
+          >
+            <Database className="w-3.5 h-3.5 text-indigo-600" />
+            Import Database
+          </button>
+
           <button
             id="account-view-open-guide-btn"
             onClick={onOpenGuide}
@@ -372,11 +399,11 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
             id="btn-upload-whole-folder"
             onClick={() => folderInputRef.current?.click()}
             disabled={uploading}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
             title="Upload whole extracted Instagram folder (e.g. instagram-username-YYYY-MM-DD)"
           >
-            <FolderUp className="w-4 h-4 text-indigo-600" />
-            Upload Whole Folder
+            <FolderUp className="w-4 h-4 text-slate-600" />
+            Upload Folder
           </button>
 
           {/* Upload ZIP / Files Button */}
@@ -388,7 +415,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
               ${uploading ? 'bg-slate-100 text-slate-400' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
           >
             {uploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            {uploading ? 'Processing Data...' : '+ Import ZIP / JSON'}
+            {uploading ? 'Processing Data...' : '+ Import Meta ZIP/JSON'}
           </button>
         </div>
       </div>
@@ -819,6 +846,19 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
         user={selectedContact}
         accountId={account.id}
         onUpdate={fetchData}
+      />
+
+      {/* Database Import Modal */}
+      <ImportDatabaseModal
+        isOpen={isImportDbOpen}
+        onClose={() => setIsImportDbOpen(false)}
+        accountId={account.id}
+        accountName={account.name}
+        onSuccess={() => {
+          fetchData();
+          onRefresh();
+          setSuccessMsg('Account database successfully updated from JSON backup!');
+        }}
       />
     </div>
   );

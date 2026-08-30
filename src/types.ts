@@ -71,3 +71,47 @@ export interface AccountStats {
   totalHistoricalContacts: number;
 }
 
+/**
+ * Single consolidated record for a contact (e.g. @example).
+ * Contains all relationship flags, timestamps, notes, tags, and history events in a single object.
+ */
+export interface UnifiedContactRecord {
+  username: string;
+  follows_you: boolean;
+  you_follow: boolean;
+  is_mutual: boolean;
+  is_close_friend: boolean;
+  is_blocked: boolean;
+  is_restricted: boolean;
+  is_favorite: boolean;
+  is_missing: boolean;
+  is_manually_removed: boolean;
+  has_pending_request_sent: boolean;
+  has_pending_request_received: boolean;
+  removal_type: 'unfollowed_you' | 'you_unfollowed' | 'removed_by_you' | 'blocked' | 'unknown' | null;
+  followed_at: string | null;
+  imported_at: string | null;
+  removed_at: string | null;
+  last_seen: string;
+  notes: string;
+  tags: string[];
+  events: HistoryEvent[];
+}
+
+export interface UnifiedAccountBackup {
+  id: string;
+  name: string;
+  created_at: string;
+  last_updated: string | null;
+  export_folder_name?: string | null;
+  stats?: AccountStats;
+  contacts: Record<string, UnifiedContactRecord>;
+}
+
+export interface UnifiedDatabaseBackup {
+  format: 'instagram_tracker_database';
+  version: '1.0';
+  exported_at: string;
+  accounts: UnifiedAccountBackup[];
+}
+

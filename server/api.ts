@@ -10,7 +10,7 @@ import {
   ParsedExportData, 
   ParsedItem 
 } from './instagram';
-import { Account, AccountHistory, UserRecord, HistoryEvent } from '../src/types';
+import { Account, AccountHistory, UserRecord, HistoryEvent, UnifiedContactRecord, UnifiedAccountBackup, UnifiedDatabaseBackup } from '../src/types';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -446,6 +446,407 @@ router.post('/clear-all-data', async (req, res) => {
   }
 });
 
+/**
+ * Builds a single consolidated JSON database record for an account and all its contacts.
+ * Each contact @example has exactly ONE comprehensive {} object containing all flags,
+ * timestamps, notes, tags, and timeline events.
+ */
+export async function buildUnifiedAccountBackup(accountId: string): Promise<UnifiedAccountBackup | null> {
+  const accounts = await getAccounts();
+  const account = accounts.find(a => a.id === accountId);
+  if (!account) return null;
+
+  const history = await getAccountHistory(accountId);
+  const contacts: Record<string, UnifiedContactRecord> = {};
+
+  const currentFollowersSet = new Set(
+    Object.values(history.followers || {})
+      .filter(u => u.currently_following !== false && !u.removed_at)
+      .map(u => u.username.toLowerCase())
+  );
+
+  const currentFollowingSet = new Set(
+    Object.values(history.following || {})
+      .filter(u => {
+        if (u.removed_at && (u.removal_type === 'you_unfollowed' || u.currently_followed_by_you === false)) return false;
+        if (history.unfollowed_by_you?.[u.username]) return false;
+        return true;
+      })
+      .map(u => u.username.toLowerCase())
+  );
+
+  // Collect all known contact usernames across all sets
+  const allUsernames = new Set<string>([
+    ...Object.keys(history.all_known_users || {}),
+    ...Object.keys(history.followers || {}),
+    ...Object.keys(history.following || {}),
+    ...Object.keys(history.unfollowed_by_you || {}),
+    ...Object.keys(history.close_friends || {}),
+    ...Object.keys(history.blocked || {}),
+    ...Object.keys(history.restricted || {}),
+    ...Object.keys(history.pending_sent || {}),
+    ...Object.keys(history.pending_received || {}),
+    ...Object.keys(history.favorites || {}),
+    ...Object.keys(history.user_notes || {}),
+    ...Object.keys(history.user_tags || {})
+  ]);
+
+  for (const u of allUsernames) {
+    const raw = history.all_known_users?.[u] || 
+                history.followers?.[u] || 
+                history.following?.[u] || 
+                history.unfollowed_by_you?.[u] || {
+                  username: u,
+                  added_at: new Date().toISOString(),
+                  last_seen: new Date().toISOString(),
+                  currently_following: false
+                };
+
+    const fol = history.followers?.[u];
+    const fing = history.following?.[u];
+    const unf = history.unfollowed_by_you?.[u];
+    const cf = history.close_friends?.[u];
+    const blk = history.blocked?.[u];
+    const rst = history.restricted?.[u];
+    const ps = history.pending_sent?.[u];
+    const pr = history.pending_received?.[u];
+    const fav = history.favorites?.[u];
+
+    const followsYou = currentFollowersSet.has(u);
+    const youFollow = currentFollowingSet.has(u);
+    const isMutual = followsYou && youFollow;
+    const isCloseFriend = Boolean(cf || raw.is_close_friend);
+    const isBlocked = Boolean(blk || raw.is_blocked);
+    const isRestricted = Boolean(rst || raw.is_restricted);
+    const isFavorite = Boolean(fav || raw.is_favorite);
+    
+    const tags = Array.from(new Set([
+      ...(history.user_tags?.[u] || []),
+      ...(raw.tags || []),
+      ...(fol?.tags || []),
+      ...(fing?.tags || [])
+    ]));
+
+    const isMissing = tags.includes('manually_missing');
+    const isManuallyRemoved = tags.includes('manually_removed') || Boolean(unf);
+    const hasPendingSent = Boolean(ps || raw.has_pending_request_sent);
+    const hasPendingReceived = Boolean(pr || raw.has_pending_request_received);
+
+    const removalType = raw.removal_type || fol?.removal_type || fing?.removal_type || unf?.removal_type || null;
+    const followedAt = raw.followed_at || fing?.followed_at || fol?.followed_at || null;
+    const importedAt = raw.imported_at || fol?.imported_at || fing?.imported_at || unf?.imported_at || raw.added_at || raw.last_seen || null;
+    const removedAt = raw.removed_at || fol?.removed_at || fing?.removed_at || unf?.removed_at || null;
+    const lastSeen = raw.last_seen || fol?.last_seen || fing?.last_seen || new Date().toISOString();
+    const notes = history.user_notes?.[u] || raw.notes || '';
+    const events = raw.events || fol?.events || fing?.events || [];
+
+    // Single unified contact object
+    contacts[u] = {
+      username: u,
+      follows_you: followsYou,
+      you_follow: youFollow,
+      is_mutual: isMutual,
+      is_close_friend: isCloseFriend,
+      is_blocked: isBlocked,
+      is_restricted: isRestricted,
+      is_favorite: isFavorite,
+      is_missing: isMissing,
+      is_manually_removed: isManuallyRemoved,
+      has_pending_request_sent: hasPendingSent,
+      has_pending_request_received: hasPendingReceived,
+      removal_type: removalType,
+      followed_at: followedAt,
+      imported_at: importedAt,
+      removed_at: removedAt,
+      last_seen: lastSeen,
+      notes,
+      tags,
+      events
+    };
+  }
+
+  return {
+    id: account.id,
+    name: account.name,
+    created_at: account.created_at,
+    last_updated: account.last_updated,
+    export_folder_name: account.export_folder_name,
+    contacts
+  };
+}
+
+/**
+ * Restores an account and its full contact history from a single unified backup JSON.
+ */
+export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, targetAccountId?: string): Promise<Account> {
+  const accounts = await getAccounts();
+  let account = targetAccountId ? accounts.find(a => a.id === targetAccountId) : undefined;
+  
+  if (!account && backup.name) {
+    account = accounts.find(a => a.name.toLowerCase() === backup.name.toLowerCase());
+  }
+
+  if (!account) {
+    account = {
+      id: backup.id || uuidv4(),
+      name: backup.name || 'imported_account',
+      created_at: backup.created_at || new Date().toISOString(),
+      last_updated: new Date().toISOString(),
+      export_folder_name: backup.export_folder_name || 'unified_database_backup'
+    };
+    accounts.push(account);
+  } else {
+    account.last_updated = new Date().toISOString();
+    if (backup.export_folder_name) {
+      account.export_folder_name = backup.export_folder_name;
+    }
+  }
+
+  await saveAccounts(accounts);
+
+  // Reconstruct AccountHistory from each contact's single {} record
+  const history: AccountHistory = {
+    followers: {},
+    following: {},
+    unfollowed_by_you: {},
+    close_friends: {},
+    blocked: {},
+    restricted: {},
+    pending_sent: {},
+    pending_received: {},
+    favorites: {},
+    all_known_users: {},
+    user_notes: {},
+    user_tags: {}
+  };
+
+  const contacts = backup.contacts || {};
+  for (const [usernameKey, contact] of Object.entries(contacts)) {
+    const username = (contact.username || usernameKey).toLowerCase().trim();
+    if (!username) continue;
+
+    const tags = Array.isArray(contact.tags) ? [...contact.tags] : [];
+    if (contact.is_missing && !tags.includes('manually_missing')) {
+      tags.push('manually_missing');
+    }
+    if (contact.is_manually_removed && !tags.includes('manually_removed')) {
+      tags.push('manually_removed');
+    }
+
+    if (contact.notes) {
+      history.user_notes![username] = contact.notes;
+    }
+    if (tags.length > 0) {
+      history.user_tags![username] = tags;
+    }
+
+    const userRecord: UserRecord = {
+      username,
+      followed_at: contact.followed_at || null,
+      imported_at: contact.imported_at || contact.followed_at || new Date().toISOString(),
+      added_at: contact.followed_at || contact.imported_at || new Date().toISOString(),
+      last_seen: contact.last_seen || new Date().toISOString(),
+      currently_following: Boolean(contact.follows_you),
+      currently_followed_by_you: Boolean(contact.you_follow),
+      removed_at: contact.removed_at || null,
+      removal_type: contact.removal_type || undefined,
+      is_close_friend: Boolean(contact.is_close_friend),
+      is_blocked: Boolean(contact.is_blocked),
+      is_restricted: Boolean(contact.is_restricted),
+      is_favorite: Boolean(contact.is_favorite),
+      has_pending_request_sent: Boolean(contact.has_pending_request_sent),
+      has_pending_request_received: Boolean(contact.has_pending_request_received),
+      notes: contact.notes || '',
+      tags,
+      events: Array.isArray(contact.events) ? contact.events : []
+    };
+
+    history.all_known_users![username] = userRecord;
+
+    if (contact.follows_you) {
+      history.followers[username] = { ...userRecord, currently_following: true };
+    } else if (contact.removal_type === 'unfollowed_you' || (contact.removed_at && !contact.is_manually_removed)) {
+      history.followers[username] = { ...userRecord, currently_following: false };
+    }
+
+    if (contact.you_follow) {
+      history.following[username] = { ...userRecord, currently_followed_by_you: true };
+    }
+
+    if (contact.is_manually_removed || contact.removal_type === 'you_unfollowed' || contact.removal_type === 'removed_by_you') {
+      history.unfollowed_by_you![username] = { ...userRecord, currently_followed_by_you: false };
+    }
+
+    if (contact.is_close_friend) {
+      history.close_friends![username] = userRecord;
+    }
+    if (contact.is_blocked) {
+      history.blocked![username] = userRecord;
+    }
+    if (contact.is_restricted) {
+      history.restricted![username] = userRecord;
+    }
+    if (contact.has_pending_request_sent) {
+      history.pending_sent![username] = userRecord;
+    }
+    if (contact.has_pending_request_received) {
+      history.pending_received![username] = userRecord;
+    }
+    if (contact.is_favorite) {
+      history.favorites![username] = userRecord;
+    }
+  }
+
+  await saveAccountHistory(account.id, history);
+  return account;
+}
+
+// Export entire local JSON database across ALL accounts
+router.get('/database/export', async (req, res) => {
+  try {
+    const accounts = await getAccounts();
+    const accountBackups: UnifiedAccountBackup[] = [];
+
+    for (const acc of accounts) {
+      const backup = await buildUnifiedAccountBackup(acc.id);
+      if (backup) {
+        accountBackups.push(backup);
+      }
+    }
+
+    const payload: UnifiedDatabaseBackup = {
+      format: 'instagram_tracker_database',
+      version: '1.0',
+      exported_at: new Date().toISOString(),
+      accounts: accountBackups
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="instagram_tracker_database_${new Date().toISOString().split('T')[0]}.json"`);
+    res.json(payload);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Export single account database in unified single-record format
+router.get('/accounts/:id/export-database', async (req, res) => {
+  try {
+    const backup = await buildUnifiedAccountBackup(req.params.id);
+    if (!backup) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    const payload = {
+      format: 'instagram_tracker_database',
+      version: '1.0',
+      exported_at: new Date().toISOString(),
+      account: backup
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="instagram_${backup.name}_database_${new Date().toISOString().split('T')[0]}.json"`);
+    res.json(payload);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Import unified JSON database backup (all accounts or single account)
+router.post('/database/import', upload.single('file'), async (req, res) => {
+  try {
+    let payload: any = null;
+
+    if (req.file) {
+      try {
+        payload = JSON.parse(req.file.buffer.toString('utf-8'));
+      } catch (e: any) {
+        return res.status(400).json({ error: 'Invalid JSON file format.' });
+      }
+    } else if (req.body && (req.body.database || req.body.accounts || req.body.account || req.body.contacts)) {
+      payload = req.body.database || req.body;
+    } else {
+      return res.status(400).json({ error: 'No database JSON content provided.' });
+    }
+
+    const importedAccounts: Account[] = [];
+    let totalContactsImported = 0;
+
+    if (payload.accounts && Array.isArray(payload.accounts)) {
+      for (const accBackup of payload.accounts) {
+        const acc = await importUnifiedAccountBackup(accBackup);
+        importedAccounts.push(acc);
+        totalContactsImported += Object.keys(accBackup.contacts || {}).length;
+      }
+    } else if (payload.account && typeof payload.account === 'object') {
+      const acc = await importUnifiedAccountBackup(payload.account);
+      importedAccounts.push(acc);
+      totalContactsImported += Object.keys(payload.account.contacts || {}).length;
+    } else if (payload.contacts && typeof payload.contacts === 'object') {
+      const acc = await importUnifiedAccountBackup(payload as UnifiedAccountBackup);
+      importedAccounts.push(acc);
+      totalContactsImported += Object.keys(payload.contacts || {}).length;
+    } else if (Array.isArray(payload)) {
+      for (const item of payload) {
+        if (item && item.contacts) {
+          const acc = await importUnifiedAccountBackup(item as UnifiedAccountBackup);
+          importedAccounts.push(acc);
+          totalContactsImported += Object.keys(item.contacts || {}).length;
+        }
+      }
+    } else {
+      return res.status(400).json({ error: 'Unrecognized database backup structure. Expected "accounts" or "contacts" mapping.' });
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully imported ${importedAccounts.length} account(s) and ${totalContactsImported} contact records.`,
+      importedAccounts,
+      totalContactsImported
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Import unified database JSON directly into a specific account
+router.post('/accounts/:id/import-database', upload.single('file'), async (req, res) => {
+  try {
+    let payload: any = null;
+
+    if (req.file) {
+      try {
+        payload = JSON.parse(req.file.buffer.toString('utf-8'));
+      } catch (e: any) {
+        return res.status(400).json({ error: 'Invalid JSON file format.' });
+      }
+    } else if (req.body) {
+      payload = req.body.database || req.body.account || req.body;
+    }
+
+    if (!payload) {
+      return res.status(400).json({ error: 'No database JSON content provided.' });
+    }
+
+    const backupAccount = payload.account || (payload.contacts ? payload : payload.accounts?.[0]);
+    if (!backupAccount || !backupAccount.contacts) {
+      return res.status(400).json({ error: 'No contacts found in provided JSON.' });
+    }
+
+    const updatedAccount = await importUnifiedAccountBackup(backupAccount, req.params.id);
+    const contactsCount = Object.keys(backupAccount.contacts || {}).length;
+
+    res.json({
+      success: true,
+      message: `Successfully imported ${contactsCount} contact records into @${updatedAccount.name}.`,
+      account: updatedAccount,
+      contactsCount
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Upload an entire exported folder or multiple files directly
 router.post('/accounts/upload-folder', upload.array('files'), async (req, res) => {
   try {
@@ -509,6 +910,32 @@ router.post('/accounts/upload-folder', upload.array('files'), async (req, res) =
       } else if (lowerName.endsWith('.json')) {
         try {
           const jsonContent = JSON.parse(file.buffer.toString('utf-8'));
+          
+          // Auto-detect unified single-record database JSON backup file
+          if (jsonContent && (jsonContent.format === 'instagram_tracker_database' || jsonContent.contacts || (jsonContent.account && jsonContent.account.contacts) || (Array.isArray(jsonContent.accounts)))) {
+            if (jsonContent.accounts && Array.isArray(jsonContent.accounts)) {
+              for (const accB of jsonContent.accounts) {
+                await importUnifiedAccountBackup(accB);
+              }
+              const accs = await getAccounts();
+              return res.json({
+                success: true,
+                isDatabaseBackup: true,
+                message: `Imported ${jsonContent.accounts.length} account(s) from unified JSON database.`,
+                account: accs[0]
+              });
+            } else if (jsonContent.account || jsonContent.contacts) {
+              const accB = jsonContent.account || jsonContent;
+              const imported = await importUnifiedAccountBackup(accB, targetAccountId || undefined);
+              return res.json({
+                success: true,
+                isDatabaseBackup: true,
+                message: `Imported account @${imported.name} from unified JSON database.`,
+                account: imported
+              });
+            }
+          }
+
           categorizeAndIngestFile(relPath, jsonContent, exportData);
         } catch (jsonErr) {
           console.warn(`Could not parse JSON file ${relPath}:`, jsonErr);
