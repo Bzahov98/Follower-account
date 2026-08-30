@@ -22,10 +22,47 @@ export const api = {
     if (!res.ok) throw new Error('Failed to delete account');
   },
   
-  uploadData: async (id: string, files: FileList | File[]): Promise<{ followersParsed: number, followingParsed: number }> => {
+  uploadFolder: async (
+    files: File[], 
+    folderName?: string, 
+    filePaths?: string[], 
+    accountId?: string
+  ): Promise<{ success: boolean; account: Account; statsSummary: any }> => {
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) {
       formData.append('files', files[i]);
+    }
+    if (folderName) formData.append('folderName', folderName);
+    if (accountId) formData.append('accountId', accountId);
+    if (filePaths && filePaths.length > 0) {
+      formData.append('filePaths', JSON.stringify(filePaths));
+    }
+    
+    const res = await fetch('/api/accounts/upload-folder', {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(error.error || 'Upload failed');
+    }
+    return res.json();
+  },
+
+  uploadData: async (
+    id: string, 
+    files: FileList | File[], 
+    folderName?: string,
+    filePaths?: string[]
+  ): Promise<{ followersParsed: number, followingParsed: number, recentlyUnfollowedParsed?: number }> => {
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+    if (folderName) formData.append('folderName', folderName);
+    if (filePaths && filePaths.length > 0) {
+      formData.append('filePaths', JSON.stringify(filePaths));
     }
     
     const res = await fetch(`/api/accounts/${id}/upload`, {
@@ -58,5 +95,16 @@ export const api = {
     const res = await fetch(`/api/accounts/${id}/data`);
     if (!res.ok) throw new Error('Failed to fetch account data');
     return res.json();
+  },
+
+  updateUserNotes: async (accountId: string, username: string, notes?: string, tags?: string[]): Promise<any> => {
+    const res = await fetch(`/api/accounts/${accountId}/contacts/${encodeURIComponent(username)}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes, tags })
+    });
+    if (!res.ok) throw new Error('Failed to update contact notes');
+    return res.json();
   }
 };
+

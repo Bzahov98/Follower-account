@@ -171,6 +171,7 @@ export default function App() {
               onSelect={setCurrentAccount} 
               onDelete={handleDelete}
               onOpenGuide={() => setIsGuideOpen(true)}
+              onRefreshList={loadAccounts}
             />
           ) : (
             <AccountView 
