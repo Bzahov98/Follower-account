@@ -25,6 +25,7 @@ interface DashboardProps {
   onDelete: (id: string) => void;
   onOpenGuide: () => void;
   onRefreshList: () => void;
+  onOpenClearData?: () => void;
 }
 
 export default function Dashboard({ 
@@ -33,7 +34,8 @@ export default function Dashboard({
   onSelect, 
   onDelete, 
   onOpenGuide,
-  onRefreshList
+  onRefreshList,
+  onOpenClearData
 }: DashboardProps) {
   const [newName, setNewName] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -273,12 +275,26 @@ export default function Dashboard({
             </span>
           </div>
 
-          <button
-            onClick={onOpenGuide}
-            className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1 hover:underline cursor-pointer"
-          >
-            <HelpCircle className="w-3.5 h-3.5" /> How to get data from Meta?
-          </button>
+          <div className="flex items-center gap-3">
+            {accounts.length > 0 && onOpenClearData && (
+              <button
+                id="dashboard-clear-all-data-btn"
+                onClick={onOpenClearData}
+                className="text-xs text-red-600 hover:text-red-700 font-semibold flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-red-200 hover:bg-red-50 transition-colors cursor-pointer"
+                title="Clear local database and storage"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Clear Local Data
+              </button>
+            )}
+
+            <button
+              onClick={onOpenGuide}
+              className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1 hover:underline cursor-pointer"
+            >
+              <HelpCircle className="w-3.5 h-3.5" /> How to get data from Meta?
+            </button>
+          </div>
         </div>
 
         {accounts.length === 0 ? (

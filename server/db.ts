@@ -40,3 +40,20 @@ export async function getAccountHistory(id: string): Promise<AccountHistory> {
 export async function saveAccountHistory(id: string, history: AccountHistory): Promise<void> {
   await fs.writeFile(path.join(DATA_DIR, `account_${id}_history.json`), JSON.stringify(history, null, 2));
 }
+
+export async function deleteAccountHistory(id: string): Promise<void> {
+  const file = path.join(DATA_DIR, `account_${id}_history.json`);
+  try {
+    await fs.unlink(file);
+  } catch {}
+}
+
+export async function clearAllLocalData(): Promise<void> {
+  try {
+    const files = await fs.readdir(DATA_DIR);
+    for (const file of files) {
+      await fs.unlink(path.join(DATA_DIR, file));
+    }
+  } catch {}
+  await initDb();
+}

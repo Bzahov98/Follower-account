@@ -67,6 +67,7 @@ export interface AccountStats {
   closeFriends: number;
   blockedCount: number;
   restrictedCount: number;
+  missingCount?: number;
   totalHistoricalContacts: number;
 }
 

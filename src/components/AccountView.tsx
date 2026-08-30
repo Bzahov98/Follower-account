@@ -20,9 +20,11 @@ import {
   UserCheck, 
   Archive, 
   Clock, 
-  ArrowUpDown,
-  Filter,
-  Check
+  ArrowUpDown, 
+  Filter, 
+  Check, 
+  Trash2,
+  FileQuestion
 } from 'lucide-react';
 import { format } from 'date-fns';
 import ContactDetailModal from './ContactDetailModal';
@@ -31,18 +33,20 @@ interface AccountViewProps {
   account: Account;
   onRefresh: () => void;
   onOpenGuide: () => void;
+  onOpenClearData?: () => void;
 }
 
 type TabType = 
   | 'non-followers' 
   | 'unfollowers' 
   | 'you-unfollowed' 
+  | 'missing'
   | 'all-contacts' 
   | 'followers' 
   | 'following' 
   | 'mutuals';
 
-export default function AccountView({ account, onRefresh, onOpenGuide }: AccountViewProps) {
+export default function AccountView({ account, onRefresh, onOpenGuide, onOpenClearData }: AccountViewProps) {
   const [stats, setStats] = useState<AccountStats | null>(null);
   const [lists, setLists] = useState<Record<string, UserRecord[]>>({});
   const [activeTab, setActiveTab] = useState<TabType>('non-followers');
@@ -57,6 +61,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide }: Account
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('all');
   const [selectedContact, setSelectedContact] = useState<UserRecord | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [actionLoadingUser, setActionLoadingUser] = useState<string | null>(null);
 
   const folderInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -210,6 +215,42 @@ export default function AccountView({ account, onRefresh, onOpenGuide }: Account
     setIsDetailOpen(true);
   };
 
+  const handleToggleManualRemove = async (e: React.MouseEvent, user: UserRecord) => {
+    e.stopPropagation();
+    const isCurrentlyManuallyRemoved = (user.tags || []).includes('manually_removed') || user.removal_type === 'you_unfollowed';
+    const action = isCurrentlyManuallyRemoved ? 'unmark' : 'remove';
+
+    setActionLoadingUser(user.username);
+    try {
+      await api.manualRemoveContact(account.id, user.username, action);
+      await fetchData();
+      onRefresh();
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Failed to update contact status');
+    } finally {
+      setActionLoadingUser(null);
+    }
+  };
+
+  const handleToggleMissing = async (e: React.MouseEvent, user: UserRecord) => {
+    e.stopPropagation();
+    const isCurrentlyMissing = (user.tags || []).includes('manually_missing');
+    const action = isCurrentlyMissing ? 'unmark' : 'missing';
+
+    setActionLoadingUser(user.username);
+    try {
+      await api.manualMissingContact(account.id, user.username, action);
+      await fetchData();
+      onRefresh();
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Failed to update contact missing status');
+    } finally {
+      setActionLoadingUser(null);
+    }
+  };
+
   const getActiveList = (): UserRecord[] => {
     switch (activeTab) {
       case 'followers': return lists.followers || [];
@@ -217,6 +258,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide }: Account
       case 'non-followers': return lists.nonFollowers || [];
       case 'unfollowers': return lists.unfollowers || [];
       case 'you-unfollowed': return lists.youUnfollowed || [];
+      case 'missing': return lists.missing || [];
       case 'all-contacts': return lists.allContacts || [];
       case 'mutuals': return lists.mutuals || [];
       default: return [];
@@ -311,6 +353,19 @@ export default function AccountView({ account, onRefresh, onOpenGuide }: Account
             <HelpCircle className="w-4 h-4 text-blue-600" />
             Export Guide
           </button>
+
+          {/* Clear Local Data Button */}
+          {onOpenClearData && (
+            <button
+              id="account-view-clear-data-btn"
+              onClick={onOpenClearData}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-red-200 text-red-700 hover:bg-red-50 transition-colors shadow-xs cursor-pointer"
+              title="Clear or reset local contact records and history"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-600" />
+              Clear Data
+            </button>
+          )}
 
           {/* Upload Whole Folder Button */}
           <button
@@ -417,6 +472,15 @@ export default function AccountView({ account, onRefresh, onOpenGuide }: Account
               active={activeTab === 'you-unfollowed'}
             />
             <StatCard 
+              label="Missing" 
+              value={stats.missingCount || (lists.missing || []).length} 
+              icon={FileQuestion} 
+              color="purple" 
+              subtitle="Marked missing" 
+              onClick={() => setActiveTab('missing')}
+              active={activeTab === 'missing'}
+            />
+            <StatCard 
               label="All Contacts" 
               value={stats.allKnownContacts || (lists.allContacts || []).length} 
               icon={Archive} 
@@ -498,6 +562,12 @@ export default function AccountView({ account, onRefresh, onOpenGuide }: Account
                 onClick={setActiveTab} 
               />
               <Tab 
+                id="missing" 
+                label={`Missing (${stats.missingCount || (lists.missing || []).length})`} 
+                active={activeTab} 
+                onClick={setActiveTab} 
+              />
+              <Tab 
                 id="all-contacts" 
                 label={`All History Archive (${stats.allKnownContacts || (lists.allContacts || []).length})`} 
                 active={activeTab} 
@@ -559,9 +629,10 @@ export default function AccountView({ account, onRefresh, onOpenGuide }: Account
                                 @{user.username}
                               </span>
 
-                              {user.removal_type === 'you_unfollowed' && (
-                                <span className="text-[10px] font-semibold bg-amber-100 text-amber-800 px-2 py-0.5 rounded">
-                                  You Unfollowed
+                              {(user.tags?.includes('manually_removed') || user.removal_type === 'you_unfollowed') && (
+                                <span className="text-[10px] font-semibold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded flex items-center gap-1">
+                                  <UserMinus className="w-2.5 h-2.5 text-amber-700" />
+                                  You Removed
                                 </span>
                               )}
 
@@ -609,6 +680,47 @@ export default function AccountView({ account, onRefresh, onOpenGuide }: Account
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={actionLoadingUser === user.username}
+                            onClick={(e) => handleToggleManualRemove(e, user)}
+                            className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors border flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                              user.tags?.includes('manually_removed') || user.removal_type === 'you_unfollowed'
+                                ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
+                                : 'bg-slate-50 hover:bg-red-50 text-slate-700 hover:text-red-700 border-slate-200 hover:border-red-200'
+                            }`}
+                            title={
+                              user.tags?.includes('manually_removed') || user.removal_type === 'you_unfollowed'
+                                ? 'Click to unmark manual removal'
+                                : 'Mark that you manually unfollowed / removed this account (#manually_removed)'
+                            }
+                          >
+                            <UserMinus className="w-3.5 h-3.5" />
+                            <span>
+                              {user.tags?.includes('manually_removed') || user.removal_type === 'you_unfollowed'
+                                ? 'Manually Removed ✓'
+                                : 'Mark Removed'}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={actionLoadingUser === user.username}
+                            onClick={(e) => handleToggleMissing(e, user)}
+                            className={`p-1.5 rounded-lg transition-colors border cursor-pointer disabled:opacity-50 ${
+                              user.tags?.includes('manually_missing')
+                                ? 'bg-purple-100 hover:bg-purple-200 text-purple-900 border-purple-300'
+                                : 'bg-slate-50 hover:bg-purple-50 text-slate-700 hover:text-purple-700 border-slate-200 hover:border-purple-200'
+                            }`}
+                            title={
+                              user.tags?.includes('manually_missing')
+                                ? 'Marked as Missing (#manually_missing) - Click to unmark'
+                                : 'Mark as Missing (#manually_missing)'
+                            }
+                          >
+                            <FileQuestion className="w-4 h-4" />
+                          </button>
+
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

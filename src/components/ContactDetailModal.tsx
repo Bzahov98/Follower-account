@@ -16,7 +16,8 @@ import {
   Save, 
   Plus, 
   Check, 
-  Info 
+  Info,
+  FileQuestion
 } from 'lucide-react';
 import { UserRecord } from '../types';
 import { api } from '../lib/api';
@@ -41,6 +42,8 @@ export default function ContactDetailModal({
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [saving, setSaving] = useState(false);
+  const [togglingRemove, setTogglingRemove] = useState(false);
+  const [togglingMissing, setTogglingMissing] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   useEffect(() => {
@@ -81,11 +84,50 @@ export default function ContactDetailModal({
     setTags(tags.filter(t => t !== tagToRemove));
   };
 
+  const handleToggleManualRemovalModal = async () => {
+    setTogglingRemove(true);
+    try {
+      const isCurrentlyManuallyRemoved = tags.includes('manually_removed') || user.removal_type === 'you_unfollowed';
+      const action = isCurrentlyManuallyRemoved ? 'unmark' : 'remove';
+      const res = await api.manualRemoveContact(accountId, user.username, action);
+      if (res.tags) {
+        setTags(res.tags);
+      }
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2000);
+      onUpdate();
+    } catch (err) {
+      console.error('Failed to toggle manual removal:', err);
+    } finally {
+      setTogglingRemove(false);
+    }
+  };
+
+  const handleToggleMissingModal = async () => {
+    if (!user) return;
+    setTogglingMissing(true);
+    try {
+      const isCurrentlyMissing = tags.includes('manually_missing');
+      const action = isCurrentlyMissing ? 'unmark' : 'missing';
+      const res = await api.manualMissingContact(accountId, user.username, action);
+      if (res.tags) {
+        setTags(res.tags);
+      }
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2000);
+      onUpdate();
+    } catch (err) {
+      console.error('Failed to toggle manual missing status:', err);
+    } finally {
+      setTogglingMissing(false);
+    }
+  };
+
   const getStatusBadge = () => {
     if (user.is_blocked) {
       return <span className="px-2.5 py-1 bg-red-100 text-red-800 rounded-md font-bold text-xs">Blocked Profile</span>;
     }
-    if (user.removal_type === 'you_unfollowed' || (user.currently_followed_by_you === false && user.removed_at)) {
+    if (tags.includes('manually_removed') || user.removal_type === 'you_unfollowed' || (user.currently_followed_by_you === false && user.removed_at)) {
       return <span className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-md font-bold text-xs">You Unfollowed / Removed</span>;
     }
     if (user.currently_following && user.currently_followed_by_you) {
@@ -308,11 +350,45 @@ export default function ContactDetailModal({
         </div>
 
         {/* Footer with Save Action */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
-          <div className="text-xs text-slate-500">
+        <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={togglingRemove}
+              onClick={handleToggleManualRemovalModal}
+              className={`px-3 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 ${
+                tags.includes('manually_removed') || user.removal_type === 'you_unfollowed'
+                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
+                  : 'bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 border-slate-200 hover:border-red-200'
+              }`}
+            >
+              <UserMinus className="w-3.5 h-3.5" />
+              {tags.includes('manually_removed') || user.removal_type === 'you_unfollowed'
+                ? 'Marked as Removed (#manually_removed)'
+                : 'Mark as Manually Removed'}
+            </button>
+
+            <button
+              type="button"
+              disabled={togglingMissing}
+              onClick={handleToggleMissingModal}
+              className={`p-2 rounded-xl border transition-colors cursor-pointer disabled:opacity-50 ${
+                tags.includes('manually_missing')
+                  ? 'bg-purple-100 hover:bg-purple-200 text-purple-900 border-purple-300'
+                  : 'bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border-slate-200 hover:border-purple-200'
+              }`}
+              title={
+                tags.includes('manually_missing')
+                  ? 'Marked as Missing (#manually_missing) - Click to unmark'
+                  : 'Mark as Missing (#manually_missing)'
+              }
+            >
+              <FileQuestion className="w-4 h-4" />
+            </button>
+
             {savedSuccess && (
-              <span className="text-emerald-600 font-bold flex items-center gap-1">
-                <Check className="w-4 h-4" /> Saved changes permanently!
+              <span className="text-emerald-600 font-bold flex items-center gap-1 text-xs">
+                <Check className="w-4 h-4" /> Saved!
               </span>
             )}
           </div>

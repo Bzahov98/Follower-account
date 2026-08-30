@@ -105,6 +105,45 @@ export const api = {
     });
     if (!res.ok) throw new Error('Failed to update contact notes');
     return res.json();
+  },
+
+  manualRemoveContact: async (accountId: string, username: string, action?: 'remove' | 'unmark'): Promise<{ success: boolean; manuallyRemoved: boolean; tags: string[] }> => {
+    const res = await fetch(`/api/accounts/${accountId}/contacts/${encodeURIComponent(username)}/manual-remove`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action })
+    });
+    if (!res.ok) throw new Error('Failed to toggle manual removal');
+    return res.json();
+  },
+
+  manualMissingContact: async (accountId: string, username: string, action?: 'missing' | 'unmark'): Promise<{ success: boolean; manuallyMissing: boolean; tags: string[] }> => {
+    const res = await fetch(`/api/accounts/${accountId}/contacts/${encodeURIComponent(username)}/manual-missing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action })
+    });
+    if (!res.ok) throw new Error('Failed to toggle manual missing status');
+    return res.json();
+  },
+
+  clearAccountData: async (accountId: string, deleteProfile: boolean = false): Promise<{ success: boolean }> => {
+    const res = await fetch(`/api/accounts/${accountId}/clear-data`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deleteProfile })
+    });
+    if (!res.ok) throw new Error('Failed to clear account data');
+    return res.json();
+  },
+
+  clearAllLocalData: async (): Promise<{ success: boolean; message: string }> => {
+    const res = await fetch('/api/clear-all-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) throw new Error('Failed to clear all local data');
+    return res.json();
   }
 };
 

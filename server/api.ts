@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import { getAccounts, saveAccounts, getAccountHistory, saveAccountHistory } from './db';
+import { getAccounts, saveAccounts, getAccountHistory, saveAccountHistory, deleteAccountHistory, clearAllLocalData } from './db';
 import { 
   parseInstagramUsernames, 
   extractFromZip, 
@@ -131,6 +131,17 @@ async function processAndSaveExportData(
       const u = item.username;
       const igTimestamp = item.timestamp || null;
       const existing = history.following[u];
+
+      // If user was previously manually removed, uploading a new export where they are present/absent handles it:
+      // When a fresh following export comes in:
+      // If they are in the export, they are verified as currently followed again (and #manually_removed can be cleared as fresh report confirms status)
+      if (history.user_tags?.[u]?.includes('manually_removed')) {
+        // Next report arrived: reconcile tag
+        history.user_tags[u] = history.user_tags[u].filter(t => t !== 'manually_removed');
+        if (history.unfollowed_by_you?.[u]?.tags) {
+          history.unfollowed_by_you[u].tags = history.user_tags[u];
+        }
+      }
 
       if (!existing) {
         history.following[u] = {
@@ -381,10 +392,58 @@ router.post('/accounts', async (req, res) => {
 
 // Delete account
 router.delete('/accounts/:id', async (req, res) => {
-  let accounts = await getAccounts();
-  accounts = accounts.filter(a => a.id !== req.params.id);
-  await saveAccounts(accounts);
-  res.json({ success: true });
+  try {
+    let accounts = await getAccounts();
+    accounts = accounts.filter(a => a.id !== req.params.id);
+    await saveAccounts(accounts);
+    await deleteAccountHistory(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Clear an account's history/data while keeping or resetting the profile
+router.post('/accounts/:id/clear-data', async (req, res) => {
+  try {
+    const { deleteProfile } = req.body;
+    let accounts = await getAccounts();
+    
+    if (deleteProfile) {
+      accounts = accounts.filter(a => a.id !== req.params.id);
+      await saveAccounts(accounts);
+      await deleteAccountHistory(req.params.id);
+    } else {
+      const account = accounts.find(a => a.id === req.params.id);
+      if (account) {
+        account.last_updated = null;
+        account.export_folder_name = undefined;
+        await saveAccounts(accounts);
+      }
+      await saveAccountHistory(req.params.id, {
+        followers: {},
+        following: {},
+        unfollowed_by_you: {},
+        all_known_users: {},
+        user_notes: {},
+        user_tags: {}
+      });
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Clear ALL local application data (all accounts, contacts, and logs)
+router.post('/clear-all-data', async (req, res) => {
+  try {
+    await clearAllLocalData();
+    res.json({ success: true, message: 'All local data has been successfully cleared.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Upload an entire exported folder or multiple files directly
@@ -721,6 +780,147 @@ router.post('/accounts/:id/contacts/:username/notes', async (req, res) => {
   }
 });
 
+// Mark contact as manually removed / unfollowed
+router.post('/accounts/:id/contacts/:username/manual-remove', async (req, res) => {
+  try {
+    const { action } = req.body; // 'remove' or 'unmark'
+    const username = req.params.username.toLowerCase();
+    const history = await getAccountHistory(req.params.id);
+    const now = new Date().toISOString();
+
+    if (!history.unfollowed_by_you) history.unfollowed_by_you = {};
+    if (!history.user_tags) history.user_tags = {};
+    if (!history.user_notes) history.user_notes = {};
+
+    const existingTags = history.user_tags[username] || [];
+    const isCurrentlyMarked = existingTags.includes('manually_removed') || (history.unfollowed_by_you[username] && history.unfollowed_by_you[username].removal_type === 'you_unfollowed');
+
+    if (action === 'unmark' || (action === undefined && isCurrentlyMarked)) {
+      // Unmark manual removal: restore tags
+      history.user_tags[username] = existingTags.filter(t => t !== 'manually_removed');
+      delete history.unfollowed_by_you[username];
+
+      if (history.following[username]) {
+        history.following[username].currently_followed_by_you = true;
+        history.following[username].removed_at = null;
+        history.following[username].tags = history.user_tags[username];
+      }
+      if (history.all_known_users[username]) {
+        history.all_known_users[username].currently_followed_by_you = !!history.following[username];
+        history.all_known_users[username].removed_at = null;
+        history.all_known_users[username].tags = history.user_tags[username];
+      }
+    } else {
+      // Mark as manually removed
+      if (!existingTags.includes('manually_removed')) {
+        history.user_tags[username] = [...existingTags, 'manually_removed'];
+      }
+
+      const existingRecord = history.following[username] || history.followers[username] || history.all_known_users[username] || {
+        username,
+        added_at: now,
+        imported_at: now,
+        last_seen: now,
+        currently_following: false
+      };
+
+      const removalRecord: UserRecord = {
+        ...existingRecord,
+        username,
+        currently_followed_by_you: false,
+        removed_at: now,
+        removal_type: 'you_unfollowed',
+        notes: history.user_notes[username] || existingRecord.notes || '',
+        tags: history.user_tags[username]
+      };
+
+      if (!removalRecord.events) removalRecord.events = [];
+      removalRecord.events.push({
+        type: 'you_unfollowed',
+        timestamp: now,
+        description: 'Manually marked as removed / unfollowed by you (#manually_removed)'
+      });
+
+      // Save into unfollowed_by_you
+      history.unfollowed_by_you[username] = removalRecord;
+
+      // Update following record if present
+      if (history.following[username]) {
+        history.following[username].currently_followed_by_you = false;
+        history.following[username].removed_at = now;
+        history.following[username].removal_type = 'you_unfollowed';
+        history.following[username].tags = history.user_tags[username];
+        if (!history.following[username].events) history.following[username].events = [];
+        history.following[username].events!.push({
+          type: 'you_unfollowed',
+          timestamp: now,
+          description: 'Manually marked as removed by you (#manually_removed)'
+        });
+      }
+
+      // Update master directory
+      if (history.all_known_users[username]) {
+        history.all_known_users[username].currently_followed_by_you = false;
+        history.all_known_users[username].removed_at = now;
+        history.all_known_users[username].removal_type = 'you_unfollowed';
+        history.all_known_users[username].tags = history.user_tags[username];
+      } else {
+        history.all_known_users[username] = removalRecord;
+      }
+    }
+
+    await saveAccountHistory(req.params.id, history);
+    res.json({ 
+      success: true, 
+      manuallyRemoved: action !== 'unmark' && (action === 'remove' || !isCurrentlyMarked),
+      tags: history.user_tags[username] 
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Mark contact as manually missing
+router.post('/accounts/:id/contacts/:username/manual-missing', async (req, res) => {
+  try {
+    const { action } = req.body; // 'missing' or 'unmark'
+    const username = req.params.username.toLowerCase();
+    const history = await getAccountHistory(req.params.id);
+
+    if (!history.user_tags) history.user_tags = {};
+
+    const existingTags = history.user_tags[username] || [];
+    const isCurrentlyMarked = existingTags.includes('manually_missing');
+
+    if (action === 'unmark' || (action === undefined && isCurrentlyMarked)) {
+      history.user_tags[username] = existingTags.filter(t => t !== 'manually_missing');
+    } else {
+      if (!existingTags.includes('manually_missing')) {
+        history.user_tags[username] = [...existingTags, 'manually_missing'];
+      }
+    }
+
+    if (history.all_known_users[username]) {
+      history.all_known_users[username].tags = history.user_tags[username];
+    }
+    if (history.followers[username]) {
+      history.followers[username].tags = history.user_tags[username];
+    }
+    if (history.following[username]) {
+      history.following[username].tags = history.user_tags[username];
+    }
+
+    await saveAccountHistory(req.params.id, history);
+    res.json({ 
+      success: true, 
+      manuallyMissing: action !== 'unmark' && (action === 'missing' || !isCurrentlyMarked),
+      tags: history.user_tags[username] 
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get stats & lists
 router.get('/accounts/:id/data', async (req, res) => {
   const history = await getAccountHistory(req.params.id);
@@ -787,6 +987,7 @@ router.get('/accounts/:id/data', async (req, res) => {
   const pendingSent = Object.values(history.pending_sent || {}).map(normalizeRecord);
   const pendingReceived = Object.values(history.pending_received || {}).map(normalizeRecord);
   const allHistory = Object.values(history.all_known_users || {}).map(normalizeRecord);
+  const missing = allHistory.filter(u => u.tags?.includes('manually_missing'));
 
   // Sort lists
   const sortByUsername = (a: UserRecord, b: UserRecord) => a.username.localeCompare(b.username);
@@ -804,6 +1005,7 @@ router.get('/accounts/:id/data', async (req, res) => {
   mutuals.sort(sortByUsername);
   closeFriends.sort(sortByUsername);
   blocked.sort(sortByUsername);
+  missing.sort(sortByRecentTime);
   allHistory.sort(sortByRecentTime);
 
   const stats = {
@@ -816,6 +1018,7 @@ router.get('/accounts/:id/data', async (req, res) => {
     closeFriends: closeFriends.length,
     blockedCount: blocked.length,
     restrictedCount: restricted.length,
+    missingCount: missing.length,
     totalHistoricalContacts: allHistory.length
   };
 
@@ -833,6 +1036,7 @@ router.get('/accounts/:id/data', async (req, res) => {
       restricted,
       pendingSent,
       pendingReceived,
+      missing,
       allHistory
     }
   });

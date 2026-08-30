@@ -9,13 +9,15 @@ import { api } from './lib/api';
 import Dashboard from './components/Dashboard';
 import AccountView from './components/AccountView';
 import ExportGuideModal from './components/ExportGuideModal';
-import { Loader2, Instagram, ShieldCheck, HelpCircle, ExternalLink, BookOpen } from 'lucide-react';
+import ClearDataModal from './components/ClearDataModal';
+import { Loader2, Instagram, ShieldCheck, HelpCircle, ExternalLink, BookOpen, Trash2 } from 'lucide-react';
 
 export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentAccount, setCurrentAccount] = useState<Account | null>(null);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [isClearDataOpen, setIsClearDataOpen] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -100,8 +102,8 @@ export default function App() {
           </div>
 
           {/* Quick Access Export Guide Button */}
-          <div className="pt-2 border-t border-slate-100">
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-2">Documentation</div>
+          <div className="pt-2 border-t border-slate-100 space-y-1.5">
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-1">Tools & Docs</div>
             <button
               id="sidebar-export-guide-btn"
               onClick={() => setIsGuideOpen(true)}
@@ -111,6 +113,18 @@ export default function App() {
               <div>
                 <span className="font-bold block text-slate-800">Export Guide</span>
                 <span className="text-[10px] text-slate-400">Step-by-step Meta export</span>
+              </div>
+            </button>
+
+            <button
+              id="sidebar-clear-data-btn"
+              onClick={() => setIsClearDataOpen(true)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 bg-slate-50 hover:bg-red-50 text-slate-600 hover:text-red-700 rounded-xl border border-slate-200 hover:border-red-200 transition-all text-xs font-medium text-left cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4 text-red-500 shrink-0" />
+              <div>
+                <span className="font-semibold block">Clear Local Data</span>
+                <span className="text-[10px] text-slate-400">Reset storage / logs</span>
               </div>
             </button>
           </div>
@@ -153,6 +167,16 @@ export default function App() {
 
           <div className="flex items-center gap-3">
             <button
+              id="header-clear-data-btn"
+              onClick={() => setIsClearDataOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-red-700 hover:bg-red-50 text-xs font-semibold rounded-lg border border-slate-200 hover:border-red-200 transition-colors cursor-pointer"
+              title="Clear or wipe local data"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-500" />
+              Clear Local Data
+            </button>
+
+            <button
               id="header-open-guide-btn"
               onClick={() => setIsGuideOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg border border-blue-200 transition-colors cursor-pointer"
@@ -172,12 +196,14 @@ export default function App() {
               onDelete={handleDelete}
               onOpenGuide={() => setIsGuideOpen(true)}
               onRefreshList={loadAccounts}
+              onOpenClearData={() => setIsClearDataOpen(true)}
             />
           ) : (
             <AccountView 
               account={currentAccount} 
               onRefresh={loadAccounts}
               onOpenGuide={() => setIsGuideOpen(true)}
+              onOpenClearData={() => setIsClearDataOpen(true)}
             />
           )}
         </section>
@@ -190,6 +216,20 @@ export default function App() {
         currentAccount={currentAccount}
         accounts={accounts}
         onDataImported={loadAccounts}
+      />
+
+      {/* Clear Local Storage Data Modal */}
+      <ClearDataModal
+        isOpen={isClearDataOpen}
+        onClose={() => setIsClearDataOpen(false)}
+        currentAccount={currentAccount}
+        accounts={accounts}
+        onDataCleared={(scope) => {
+          if (scope === 'all') {
+            setCurrentAccount(null);
+          }
+          loadAccounts();
+        }}
       />
     </div>
   );

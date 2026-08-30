@@ -77,33 +77,56 @@ export function parseInstagramItems(jsonData: any): ParsedItem[] {
     if (Array.isArray(obj)) {
       obj.forEach(traverse);
     } else if (obj !== null && typeof obj === 'object') {
-      // Standard Instagram export format: string_list_data array with 'value', 'timestamp', 'href'
+      let usernameCandidate: string | null = null;
+      const timestampRaw = obj.timestamp || obj.created_timestamp;
+
+      if (typeof obj.title === 'string' && obj.title.trim().length > 0) {
+        const titleClean = obj.title.trim().toLowerCase().replace(/^@/, '');
+        if (!titleClean.includes(' ') && !titleClean.includes('http') && titleClean.length > 0) {
+          usernameCandidate = titleClean;
+        }
+      }
+
       if ('string_list_data' in obj && Array.isArray(obj.string_list_data)) {
         obj.string_list_data.forEach((item: any) => {
-          if (item && typeof item.value === 'string' && item.value.trim().length > 0) {
-            const rawUser = item.value.trim().toLowerCase().replace(/^@/, '');
-            const timestampStr = parseTimestamp(item.timestamp || obj.timestamp || obj.created_timestamp);
-            if (rawUser && !itemsMap.has(rawUser)) {
-              itemsMap.set(rawUser, {
-                username: rawUser,
-                timestamp: timestampStr,
-                href: item.href || `https://instagram.com/${rawUser}`
+          if (!item) return;
+          const val = typeof item.value === 'string' && item.value.trim().length > 0
+            ? item.value.trim().toLowerCase().replace(/^@/, '')
+            : null;
+          const href = typeof item.href === 'string' ? item.href : undefined;
+          const itemTimestamp = item.timestamp;
+
+          let u = val;
+          if (!u && href) {
+            const match = href.match(/instagram\.com\/(?:_u\/)?([a-zA-Z0-9._]+)/i);
+            if (match && match[1]) {
+              u = match[1].toLowerCase();
+            }
+          }
+          if (!u && usernameCandidate) {
+            u = usernameCandidate;
+          }
+
+          if (u) {
+            const finalTimestamp = parseTimestamp(itemTimestamp || timestampRaw);
+            if (!itemsMap.has(u)) {
+              itemsMap.set(u, {
+                username: u,
+                timestamp: finalTimestamp,
+                href: href || `https://instagram.com/${u}`
               });
+            } else if (finalTimestamp && !itemsMap.get(u)?.timestamp) {
+              const existing = itemsMap.get(u)!;
+              existing.timestamp = finalTimestamp;
             }
           }
         });
-      }
-
-      // Alternative formats or older versions where title holds username
-      if (typeof obj.title === 'string' && obj.title.trim().length > 0) {
-        const titleClean = obj.title.trim().toLowerCase().replace(/^@/, '');
-        if (!titleClean.includes(' ') && !titleClean.includes('http') && titleClean.length > 0 && !itemsMap.has(titleClean)) {
-          const firstString = Array.isArray(obj.string_list_data) ? obj.string_list_data[0] : null;
-          const timestampStr = parseTimestamp(firstString?.timestamp || obj.timestamp || obj.created_timestamp);
-          itemsMap.set(titleClean, {
-            username: titleClean,
-            timestamp: timestampStr,
-            href: firstString?.href || `https://instagram.com/${titleClean}`
+      } else if (usernameCandidate) {
+        if (!itemsMap.has(usernameCandidate)) {
+          itemsMap.set(usernameCandidate, {
+            username: usernameCandidate,
+            timestamp: parseTimestamp(timestampRaw),
+            href: `https://instagram.com/${usernameCandidate}`
           });
         }
       }
