@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import { analyzeAndParseJson } from './jsonDiagnostics';
 
 export interface ParsedItem {
   username: string;
@@ -190,10 +191,17 @@ export function categorizeAndIngestFile(filePath: string, jsonContent: any, resu
 }
 
 /**
- * Unzips an Instagram export zip archive and processes all connection files
+ * Unzips an Instagram export zip archive and processes all connection files.
+ * Provides deep diagnostics if Meta exported in HTML format or if JSON files are malformed.
  */
 export async function extractFromZip(buffer: Buffer, originalZipName?: string): Promise<ParsedExportData> {
-  const zip = await JSZip.loadAsync(buffer);
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch (zipErr: any) {
+    throw new Error(`Failed to open ZIP archive "${originalZipName || 'uploaded.zip'}": The file may be damaged or not a valid ZIP file.`);
+  }
+
   const result: ParsedExportData = {
     detectedUsername: originalZipName ? extractUsernameFromExportName(originalZipName) || undefined : undefined,
     followers: [],
@@ -206,6 +214,10 @@ export async function extractFromZip(buffer: Buffer, originalZipName?: string): 
     pendingRequestsReceived: [],
     favorites: []
   };
+
+  const detectedHtmlFiles: string[] = [];
+  const parseErrors: string[] = [];
+  let totalJsonFilesFound = 0;
 
   for (const [filename, fileObj] of Object.entries(zip.files)) {
     if (fileObj.dir) {
@@ -221,14 +233,29 @@ export async function extractFromZip(buffer: Buffer, originalZipName?: string): 
       if (u) result.detectedUsername = u;
     }
 
-    if (!filename.endsWith('.json')) continue;
+    const lowerName = filename.toLowerCase();
+
+    // Check if user exported in HTML format instead of JSON
+    if (lowerName.endsWith('.html') || lowerName.endsWith('.htm')) {
+      if (lowerName.includes('follower') || lowerName.includes('following') || lowerName.includes('connections') || lowerName.includes('profile')) {
+        detectedHtmlFiles.push(filename);
+      }
+      continue;
+    }
+
+    if (!lowerName.endsWith('.json')) continue;
     
+    totalJsonFilesFound++;
     try {
       const text = await fileObj.async('string');
-      const json = JSON.parse(text);
-      categorizeAndIngestFile(filename, json, result);
-    } catch (err) {
-      console.warn(`Could not parse JSON from zip entry ${filename}:`, err);
+      const diag = analyzeAndParseJson(text, filename);
+      if (!diag.success) {
+        parseErrors.push(diag.error || `Invalid JSON in ${filename}`);
+        continue;
+      }
+      categorizeAndIngestFile(filename, diag.data, result);
+    } catch (err: any) {
+      parseErrors.push(`Failed reading ${filename}: ${err.message}`);
     }
   }
 
@@ -250,6 +277,21 @@ export async function extractFromZip(buffer: Buffer, originalZipName?: string): 
   result.pendingRequestsSent = dedupe(result.pendingRequestsSent);
   result.pendingRequestsReceived = dedupe(result.pendingRequestsReceived);
   result.favorites = dedupe(result.favorites);
+
+  // If no connections found, provide clear and actionable diagnostic feedback
+  const totalExtracted = result.followers.length + result.following.length + result.recentlyUnfollowed.length;
+  if (totalExtracted === 0) {
+    if (detectedHtmlFiles.length > 0 && totalJsonFilesFound === 0) {
+      const sampleFiles = detectedHtmlFiles.slice(0, 3).join(', ');
+      throw new Error(
+        `HTML export detected! The ZIP archive contains HTML files (${sampleFiles}) instead of JSON files. ` +
+        `In Meta Accounts Center, the format was set to HTML. You must request a new export from Meta with format set to "JSON".`
+      );
+    }
+    if (parseErrors.length > 0) {
+      throw new Error(`Encountered JSON parse errors in ZIP archive: ${parseErrors.slice(0, 2).join('; ')}`);
+    }
+  }
 
   return result;
 }

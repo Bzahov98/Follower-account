@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Account, AccountStats, UserRecord } from '../types';
-import { api } from '../lib/api';
+import { api, ApiError, ApiErrorInfo } from '../lib/api';
 import { 
   Upload, 
   Users, 
@@ -54,7 +54,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
   const [lists, setLists] = useState<Record<string, UserRecord[]>>({});
   const [activeTab, setActiveTab] = useState<TabType>('non-followers');
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState('');
+  const [errorInfo, setErrorInfo] = useState<ApiErrorInfo | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -70,6 +70,30 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
   const folderInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const setStructuredError = (err: any, fallbackMessage: string = 'An error occurred') => {
+    if (err instanceof ApiError) {
+      setErrorInfo({
+        error: err.message,
+        technicalDetails: err.technicalDetails,
+        detectedFormat: err.detectedFormat,
+        previewSnippet: err.previewSnippet,
+        troubleshooting: err.troubleshooting
+      });
+    } else if (typeof err === 'object' && err !== null && 'error' in err) {
+      setErrorInfo({
+        error: err.error || fallbackMessage,
+        technicalDetails: err.technicalDetails,
+        detectedFormat: err.detectedFormat,
+        previewSnippet: err.previewSnippet,
+        troubleshooting: err.troubleshooting
+      });
+    } else {
+      setErrorInfo({
+        error: typeof err === 'string' ? err : (err?.message || fallbackMessage)
+      });
+    }
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -78,7 +102,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
       setLists(data.lists);
     } catch (err) {
       console.error(err);
-      setError('Failed to load account data.');
+      setStructuredError(err, 'Failed to load account data.');
     } finally {
       setLoading(false);
     }
@@ -138,7 +162,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
   const processFolderUpload = async (files: File[], paths: string[], folderName?: string) => {
     if (files.length === 0) return;
     setUploading(true);
-    setError('');
+    setErrorInfo(null);
     setSuccessMsg('');
 
     try {
@@ -148,7 +172,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
       onRefresh();
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err: any) {
-      setError(err.message || 'Error processing folder. Make sure it is an official Instagram export folder.');
+      setStructuredError(err, 'Error processing folder. Make sure it is an official Instagram export folder.');
     } finally {
       setUploading(false);
     }
@@ -157,7 +181,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
   const processFiles = async (fileList: FileList | File[]) => {
     if (!fileList || fileList.length === 0) return;
     setUploading(true);
-    setError('');
+    setErrorInfo(null);
     setSuccessMsg('');
 
     try {
@@ -177,7 +201,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
       onRefresh();
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err: any) {
-      setError(err.message || 'Error processing files. Ensure you uploaded valid Instagram JSON files or .zip archive.');
+      setStructuredError(err, 'Error processing files. Ensure you uploaded valid Instagram JSON files or .zip archive.');
     } finally {
       setUploading(false);
     }
@@ -231,7 +255,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
       onRefresh();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to update contact status');
+      setStructuredError(err, 'Failed to update contact status');
     } finally {
       setActionLoadingUser(null);
     }
@@ -249,7 +273,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
       onRefresh();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to update contact missing status');
+      setStructuredError(err, 'Failed to update contact missing status');
     } finally {
       setActionLoadingUser(null);
     }
@@ -432,17 +456,45 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
       )}
 
       {/* Error Notification */}
-      {error && (
-        <div className="bg-red-50 text-red-700 p-4 rounded-xl flex items-start gap-3 border border-red-100 shrink-0">
-          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <p className="font-semibold">{error}</p>
-            <p className="text-[11px] text-red-600 mt-1">
-              Tip: In Meta Accounts Center, make sure format was set to <strong>JSON</strong>. Check our{' '}
-              <button onClick={onOpenGuide} className="underline font-bold text-red-800 hover:text-red-950">
-                Export Guide
-              </button> for steps.
-            </p>
+      {errorInfo && (
+        <div className="bg-red-50 text-red-900 p-4 rounded-xl flex items-start gap-3 border border-red-200 shrink-0">
+          <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+          <div className="text-xs space-y-1.5 flex-1 min-w-0">
+            <div className="flex items-center justify-between">
+              <p className="font-bold text-red-800 text-sm">{errorInfo.error}</p>
+              <button 
+                onClick={() => setErrorInfo(null)} 
+                className="text-red-500 hover:text-red-800 font-bold px-1.5 text-base leading-none cursor-pointer"
+                title="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+
+            {errorInfo.technicalDetails && (
+              <p className="text-red-700 bg-red-100/70 p-2 rounded-lg border border-red-200 font-mono text-[11px] break-all whitespace-pre-wrap">
+                {errorInfo.technicalDetails}
+              </p>
+            )}
+
+            {errorInfo.previewSnippet && (
+              <div className="mt-1">
+                <p className="text-[11px] font-semibold text-red-800">File content preview received:</p>
+                <pre className="text-[10px] bg-red-100/90 text-red-950 p-2 rounded-lg font-mono overflow-x-auto max-h-24 mt-0.5 border border-red-200 whitespace-pre-wrap break-all">
+                  {errorInfo.previewSnippet}
+                </pre>
+              </div>
+            )}
+
+            <div className="text-[11px] text-red-700 pt-0.5 flex items-center flex-wrap gap-1">
+              <span>{errorInfo.troubleshooting || 'In Meta Accounts Center, make sure format was set to JSON (not HTML).'}</span>
+              <button 
+                onClick={onOpenGuide} 
+                className="underline font-bold text-red-900 hover:text-black cursor-pointer inline-flex items-center gap-0.5"
+              >
+                View Export Guide
+              </button>
+            </div>
           </div>
         </div>
       )}

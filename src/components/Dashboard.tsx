@@ -19,7 +19,7 @@ import {
   FileJson
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { api } from '../lib/api';
+import { api, ApiError, ApiErrorInfo } from '../lib/api';
 import ImportDatabaseModal from './ImportDatabaseModal';
 
 interface DashboardProps {
@@ -44,12 +44,36 @@ export default function Dashboard({
   const [newName, setNewName] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingFolder, setUploadingFolder] = useState(false);
-  const [folderUploadError, setFolderUploadError] = useState<string | null>(null);
+  const [folderUploadError, setFolderUploadError] = useState<ApiErrorInfo | null>(null);
   const [folderUploadSuccess, setFolderUploadSuccess] = useState<string | null>(null);
   const [isImportDbOpen, setIsImportDbOpen] = useState(false);
 
   const folderInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
+
+  const setStructuredUploadError = (err: any, fallbackMessage: string = 'Upload failed') => {
+    if (err instanceof ApiError) {
+      setFolderUploadError({
+        error: err.message,
+        technicalDetails: err.technicalDetails,
+        detectedFormat: err.detectedFormat,
+        previewSnippet: err.previewSnippet,
+        troubleshooting: err.troubleshooting
+      });
+    } else if (typeof err === 'object' && err !== null && 'error' in err) {
+      setFolderUploadError({
+        error: err.error || fallbackMessage,
+        technicalDetails: err.technicalDetails,
+        detectedFormat: err.detectedFormat,
+        previewSnippet: err.previewSnippet,
+        troubleshooting: err.troubleshooting
+      });
+    } else {
+      setFolderUploadError({
+        error: typeof err === 'string' ? err : (err?.message || fallbackMessage)
+      });
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,7 +99,7 @@ export default function Dashboard({
       onRefreshList();
       onSelect(res.account);
     } catch (err: any) {
-      setFolderUploadError(err.message || 'Failed to process folder. Ensure it contains Instagram JSON export files.');
+      setStructuredUploadError(err, 'Failed to process folder. Ensure it contains Instagram JSON export files.');
     } finally {
       setUploadingFolder(false);
     }
@@ -94,7 +118,7 @@ export default function Dashboard({
       onRefreshList();
       onSelect(res.account);
     } catch (err: any) {
-      setFolderUploadError(err.message || 'Failed to parse ZIP archive.');
+      setStructuredUploadError(err, 'Failed to parse ZIP archive.');
     } finally {
       setUploadingFolder(false);
     }
