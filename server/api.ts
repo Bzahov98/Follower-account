@@ -16,9 +16,102 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 /**
+ * Safely parses any date string, ISO string, milliseconds, or Unix epoch seconds into numeric epoch ms.
+ * Returns null if invalid or missing.
+ */
+export function parseDateTimestamp(val: any): number | null {
+  if (!val) return null;
+  if (typeof val === 'number') {
+    if (isNaN(val) || val <= 0) return null;
+    return val < 1e11 ? val * 1000 : val;
+  }
+  if (typeof val === 'string') {
+    const parsed = Date.parse(val);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+    const num = Number(val);
+    if (!isNaN(num) && num > 0) {
+      return num < 1e11 ? num * 1000 : num;
+    }
+  }
+  return null;
+}
+
+/**
+ * Compares two dates and returns the earliest valid ISO timestamp string.
+ * Used for earliest known follow date (followed_at) and initial discovery (imported_at).
+ */
+export function earliestIsoTimestamp(d1?: string | number | null, d2?: string | number | null): string | null {
+  const t1 = parseDateTimestamp(d1);
+  const t2 = parseDateTimestamp(d2);
+  if (t1 && t2) return new Date(Math.min(t1, t2)).toISOString();
+  if (t1) return new Date(t1).toISOString();
+  if (t2) return new Date(t2).toISOString();
+  return null;
+}
+
+/**
+ * Compares two dates and returns the most recent (latest) valid ISO timestamp string.
+ * Used for updating last_seen and active status milestones.
+ */
+export function latestIsoTimestamp(d1?: string | number | null, d2?: string | number | null): string | null {
+  const t1 = parseDateTimestamp(d1);
+  const t2 = parseDateTimestamp(d2);
+  if (t1 && t2) return new Date(Math.max(t1, t2)).toISOString();
+  if (t1) return new Date(t1).toISOString();
+  if (t2) return new Date(t2).toISOString();
+  return null;
+}
+
+/**
+ * Checks whether candidate timestamp is strictly newer or equal to a base timestamp.
+ * If base timestamp is missing, candidate is treated as newer (returns true).
+ */
+export function isTimestampNewer(candidate?: string | number | null, base?: string | number | null): boolean {
+  const tCandidate = parseDateTimestamp(candidate);
+  const tBase = parseDateTimestamp(base);
+  if (!tBase) return true;
+  if (!tCandidate) return false;
+  return tCandidate >= tBase;
+}
+
+/**
+ * Combines timeline history events from multiple backups or exports without duplicates.
+ * Deduplicates by matching type, approximate timestamp (day level), and description signature.
+ * Returns sorted chronologically.
+ */
+export function mergeHistoryEvents(eventsA: HistoryEvent[] = [], eventsB: HistoryEvent[] = []): HistoryEvent[] {
+  const seen = new Set<string>();
+  const merged: HistoryEvent[] = [];
+
+  for (const ev of [...eventsA, ...eventsB]) {
+    if (!ev || !ev.type) continue;
+    const timeKey = ev.timestamp ? new Date(ev.timestamp).toISOString().split('T')[0] : 'unknown';
+    const sig = `${ev.type}_${timeKey}_${(ev.description || '').trim().toLowerCase()}`;
+    if (!seen.has(sig)) {
+      seen.add(sig);
+      merged.push({
+        type: ev.type,
+        timestamp: ev.timestamp || new Date().toISOString(),
+        description: ev.description || ''
+      });
+    }
+  }
+
+  merged.sort((a, b) => {
+    const tA = parseDateTimestamp(a.timestamp) || 0;
+    const tB = parseDateTimestamp(b.timestamp) || 0;
+    return tA - tB;
+  });
+
+  return merged;
+}
+
+/**
  * Merge new parsed export data into persistent account history.
- * GUARANTEES: Never deletes past data for removed users; accurately records
- * timestamps, removal reasons, and event history.
+ * GUARANTEES:
+ * 1. Accurately compares incoming timestamps against existing state to prevent breaking existing data.
+ * 2. If older historical data is uploaded, it backfills earliest followed_at dates without wiping active followers.
+ * 3. If fresh/newer data is uploaded, it updates active follower statuses and records transitions.
  */
 async function processAndSaveExportData(
   accountId: string, 
@@ -26,6 +119,8 @@ async function processAndSaveExportData(
   folderOrZipName?: string
 ) {
   const history = await getAccountHistory(accountId);
+  const accounts = await getAccounts();
+  const existingAccount = accounts.find(a => a.id === accountId);
   const now = new Date().toISOString();
 
   if (!history.followers) history.followers = {};
@@ -41,43 +136,63 @@ async function processAndSaveExportData(
   if (!history.user_notes) history.user_notes = {};
   if (!history.user_tags) history.user_tags = {};
 
-  const currentFollowersSet = new Set(exportData.followers.map(f => f.username));
-  const currentFollowingSet = new Set(exportData.following.map(f => f.username));
-  const recentlyUnfollowedSet = new Set(exportData.recentlyUnfollowed.map(f => f.username));
+  // Detect whether this export is an older historical archive or a fresh/current snapshot
+  const exportTimestamps = [
+    ...exportData.followers.map(f => parseDateTimestamp(f.timestamp)),
+    ...exportData.following.map(f => parseDateTimestamp(f.timestamp)),
+    ...exportData.recentlyUnfollowed.map(f => parseDateTimestamp(f.timestamp))
+  ].filter((t): t is number => t !== null && t > 0);
+
+  const maxExportTimestamp = exportTimestamps.length > 0 ? Math.max(...exportTimestamps) : null;
+  const existingAccountTimestamp = parseDateTimestamp(existingAccount?.last_updated);
+
+  // If export has timestamps and is significantly older (e.g. > 2 days older than account's last updated state),
+  // treat it as an older historical backfill archive.
+  const isHistoricalArchive = maxExportTimestamp && existingAccountTimestamp && (existingAccountTimestamp - maxExportTimestamp > 2 * 86400000);
+
+  const currentFollowersSet = new Set(exportData.followers.map(f => f.username.toLowerCase()));
+  const currentFollowingSet = new Set(exportData.following.map(f => f.username.toLowerCase()));
+  const recentlyUnfollowedSet = new Set(exportData.recentlyUnfollowed.map(f => f.username.toLowerCase()));
 
   // 1. Process Followers (People who follow you)
   if (exportData.followers.length > 0) {
-    // Check for lost followers (previously followed you, but missing from current export)
-    Object.keys(history.followers).forEach(u => {
-      const prev = history.followers[u];
-      if (prev.currently_following && !currentFollowersSet.has(u)) {
-        prev.currently_following = false;
-        prev.removed_at = now;
-        prev.removal_type = recentlyUnfollowedSet.has(u) ? 'removed_by_you' : 'unfollowed_you';
-        if (!prev.events) prev.events = [];
-        prev.events.push({
-          type: 'lost_follower',
-          timestamp: now,
-          description: recentlyUnfollowedSet.has(u) ? 'Removed by you' : 'No longer in followers list (unfollowed you)'
-        });
-      }
-    });
+    // Check for lost followers ONLY if this is a fresh current export (not an older archive)
+    if (!isHistoricalArchive) {
+      Object.keys(history.followers).forEach(u => {
+        const prev = history.followers[u];
+        if (prev.currently_following && !currentFollowersSet.has(u.toLowerCase())) {
+          prev.currently_following = false;
+          prev.removed_at = now;
+          prev.removal_type = recentlyUnfollowedSet.has(u.toLowerCase()) ? 'removed_by_you' : 'unfollowed_you';
+          if (!prev.events) prev.events = [];
+          prev.events.push({
+            type: 'lost_follower',
+            timestamp: now,
+            description: recentlyUnfollowedSet.has(u.toLowerCase()) ? 'Removed by you' : 'No longer in followers list (unfollowed you)'
+          });
+        }
+      });
+    }
 
-    // Ingest current followers
+    // Ingest incoming followers
     exportData.followers.forEach(item => {
-      const u = item.username;
-      const igTimestamp = item.timestamp || null;
-      const existing = history.followers[u];
+      const u = item.username.toLowerCase();
+      const igTimestamp = item.timestamp ? new Date(item.timestamp).toISOString() : null;
+      const existing = history.followers[u] || history.all_known_users?.[u];
       
+      const followedAt = earliestIsoTimestamp(existing?.followed_at, igTimestamp);
+      const importedAt = earliestIsoTimestamp(existing?.imported_at, now);
+      const lastSeen = latestIsoTimestamp(existing?.last_seen, igTimestamp || now) || now;
+
       if (!existing) {
         history.followers[u] = {
           username: u,
-          followed_at: igTimestamp,
-          imported_at: now,
-          added_at: igTimestamp || now,
-          last_seen: now,
+          followed_at: followedAt,
+          imported_at: importedAt || now,
+          added_at: followedAt || importedAt || now,
+          last_seen: lastSeen,
           currently_following: true, // Follows you
-          currently_followed_by_you: currentFollowingSet.has(u), // You follow them if also in following export
+          currently_followed_by_you: currentFollowingSet.has(u),
           notes: history.user_notes?.[u] || '',
           tags: history.user_tags?.[u] || [],
           events: [{
@@ -87,7 +202,8 @@ async function processAndSaveExportData(
           }]
         };
       } else {
-        if (!existing.currently_following) {
+        const wasFollowing = Boolean(existing.currently_following);
+        if (!wasFollowing && !isHistoricalArchive) {
           if (!existing.events) existing.events = [];
           existing.events.push({
             type: 'became_follower',
@@ -95,63 +211,73 @@ async function processAndSaveExportData(
             description: 'Followed you again'
           });
         }
-        if (igTimestamp && !existing.followed_at) {
-          existing.followed_at = igTimestamp;
+        
+        existing.followed_at = followedAt;
+        existing.imported_at = importedAt || existing.imported_at;
+        existing.last_seen = lastSeen;
+        
+        // If not historical archive, update active status to true
+        if (!isHistoricalArchive || !existing.removed_at) {
+          existing.currently_following = true;
+          existing.removed_at = null;
         }
-        existing.last_seen = now;
-        existing.currently_following = true;
-        existing.removed_at = null;
-        existing.currently_followed_by_you = currentFollowingSet.has(u);
+        if (currentFollowingSet.has(u)) {
+          existing.currently_followed_by_you = true;
+        }
+        history.followers[u] = existing;
       }
     });
   }
 
   // 2. Process Following (People you follow)
   if (exportData.following.length > 0) {
-    // Detect accounts you unfollowed
-    Object.keys(history.following).forEach(u => {
-      const prev = history.following[u];
-      if (prev.currently_followed_by_you && !currentFollowingSet.has(u)) {
-        prev.currently_followed_by_you = false;
-        prev.removed_at = now;
-        prev.removal_type = 'you_unfollowed';
-        if (!prev.events) prev.events = [];
-        prev.events.push({
-          type: 'you_unfollowed',
-          timestamp: now,
-          description: 'You unfollowed this profile'
-        });
-        // Preserve in unfollowed_by_you permanent archive
-        history.unfollowed_by_you[u] = { ...prev };
-      }
-    });
+    // Detect accounts you unfollowed ONLY on fresh exports
+    if (!isHistoricalArchive) {
+      Object.keys(history.following).forEach(u => {
+        const prev = history.following[u];
+        if (prev.currently_followed_by_you && !currentFollowingSet.has(u.toLowerCase())) {
+          prev.currently_followed_by_you = false;
+          prev.removed_at = now;
+          prev.removal_type = 'you_unfollowed';
+          if (!prev.events) prev.events = [];
+          prev.events.push({
+            type: 'you_unfollowed',
+            timestamp: now,
+            description: 'You unfollowed this profile'
+          });
+          // Preserve in unfollowed_by_you permanent archive
+          history.unfollowed_by_you[u] = { ...prev };
+        }
+      });
+    }
 
     // Ingest current following
     exportData.following.forEach(item => {
-      const u = item.username;
-      const igTimestamp = item.timestamp || null;
-      const existing = history.following[u];
+      const u = item.username.toLowerCase();
+      const igTimestamp = item.timestamp ? new Date(item.timestamp).toISOString() : null;
+      const existing = history.following[u] || history.all_known_users?.[u];
 
-      // If user was previously manually removed, uploading a new export where they are present/absent handles it:
-      // When a fresh following export comes in:
-      // If they are in the export, they are verified as currently followed again (and #manually_removed can be cleared as fresh report confirms status)
+      // If user was previously manually removed, reconcile tag
       if (history.user_tags?.[u]?.includes('manually_removed')) {
-        // Next report arrived: reconcile tag
         history.user_tags[u] = history.user_tags[u].filter(t => t !== 'manually_removed');
         if (history.unfollowed_by_you?.[u]?.tags) {
           history.unfollowed_by_you[u].tags = history.user_tags[u];
         }
       }
 
+      const followedAt = earliestIsoTimestamp(existing?.followed_at, igTimestamp);
+      const importedAt = earliestIsoTimestamp(existing?.imported_at, now);
+      const lastSeen = latestIsoTimestamp(existing?.last_seen, igTimestamp || now) || now;
+
       if (!existing) {
         history.following[u] = {
           username: u,
-          followed_at: igTimestamp,
-          imported_at: now,
-          added_at: igTimestamp || now,
-          last_seen: now,
-          currently_following: currentFollowersSet.has(u), // They follow you only if in followers export
-          currently_followed_by_you: true, // You follow them
+          followed_at: followedAt,
+          imported_at: importedAt || now,
+          added_at: followedAt || importedAt || now,
+          last_seen: lastSeen,
+          currently_following: currentFollowersSet.has(u),
+          currently_followed_by_you: true,
           notes: history.user_notes?.[u] || '',
           tags: history.user_tags?.[u] || [],
           events: [{
@@ -161,7 +287,7 @@ async function processAndSaveExportData(
           }]
         };
       } else {
-        if (!existing.currently_followed_by_you) {
+        if (!existing.currently_followed_by_you && !isHistoricalArchive) {
           if (!existing.events) existing.events = [];
           existing.events.push({
             type: 'you_followed',
@@ -169,13 +295,17 @@ async function processAndSaveExportData(
             description: 'You followed this profile again'
           });
         }
-        if (igTimestamp && !existing.followed_at) {
-          existing.followed_at = igTimestamp;
+        existing.followed_at = followedAt;
+        existing.imported_at = importedAt || existing.imported_at;
+        existing.last_seen = lastSeen;
+        if (!isHistoricalArchive || !existing.removed_at) {
+          existing.currently_followed_by_you = true;
+          existing.removed_at = null;
         }
-        existing.last_seen = now;
-        existing.currently_following = currentFollowersSet.has(u);
-        existing.currently_followed_by_you = true;
-        existing.removed_at = null;
+        if (currentFollowersSet.has(u)) {
+          existing.currently_following = true;
+        }
+        history.following[u] = existing;
       }
     });
   }
@@ -347,14 +477,14 @@ async function processAndSaveExportData(
   await saveAccountHistory(accountId, history);
 
   // Update account metadata
-  const accounts = await getAccounts();
-  const account = accounts.find(a => a.id === accountId);
+  const currentAccounts = await getAccounts();
+  const account = currentAccounts.find(a => a.id === accountId);
   if (account) {
     account.last_updated = now;
     if (folderOrZipName) {
       account.export_folder_name = folderOrZipName;
     }
-    await saveAccounts(accounts);
+    await saveAccounts(currentAccounts);
   }
 }
 
@@ -577,6 +707,18 @@ export async function buildUnifiedAccountBackup(accountId: string): Promise<Unif
 
 /**
  * Restores an account and its full contact history from a single unified backup JSON.
+ * COMPARISON & SAFETY GUARANTEES:
+ * 1. Timestamp Comparison:
+ *    - followed_at: keeps the earliest verified follow date across backups.
+ *    - imported_at: keeps the earliest initial import date.
+ *    - last_seen: updates to the most recent observation date.
+ * 2. Newer vs Older Ingestion:
+ *    - If incoming backup/contact is newer: updates current active follower/following status and removal flags.
+ *    - If incoming backup/contact is older: enriches history, backfills missing contacts, merges timeline events,
+ *      and preserves earlier followed_at dates without wiping newer active relationships!
+ * 3. Notes & Tags:
+ *    - Never wipes existing notes when importing blank data; merges distinct notes.
+ *    - Unifies and deduplicates all custom tags.
  */
 export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, targetAccountId?: string): Promise<Account> {
   const accounts = await getAccounts();
@@ -586,17 +728,22 @@ export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, t
     account = accounts.find(a => a.name.toLowerCase() === backup.name.toLowerCase());
   }
 
+  const isNewAccount = !account;
+  const now = new Date().toISOString();
+
   if (!account) {
     account = {
       id: backup.id || uuidv4(),
       name: backup.name || 'imported_account',
-      created_at: backup.created_at || new Date().toISOString(),
-      last_updated: new Date().toISOString(),
+      created_at: backup.created_at || now,
+      last_updated: backup.last_updated || now,
       export_folder_name: backup.export_folder_name || 'unified_database_backup'
     };
     accounts.push(account);
   } else {
-    account.last_updated = new Date().toISOString();
+    // Preserve earliest created_at, update last_updated to the latest timestamp
+    account.created_at = earliestIsoTimestamp(account.created_at, backup.created_at) || account.created_at;
+    account.last_updated = latestIsoTimestamp(account.last_updated, backup.last_updated || now) || now;
     if (backup.export_folder_name) {
       account.export_folder_name = backup.export_folder_name;
     }
@@ -604,20 +751,22 @@ export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, t
 
   await saveAccounts(accounts);
 
-  // Reconstruct AccountHistory from each contact's single {} record
+  // Load existing account history (if any) to perform intelligent merging
+  const existingHistory = isNewAccount ? null : await getAccountHistory(account.id);
+  
   const history: AccountHistory = {
-    followers: {},
-    following: {},
-    unfollowed_by_you: {},
-    close_friends: {},
-    blocked: {},
-    restricted: {},
-    pending_sent: {},
-    pending_received: {},
-    favorites: {},
-    all_known_users: {},
-    user_notes: {},
-    user_tags: {}
+    followers: existingHistory?.followers ? { ...existingHistory.followers } : {},
+    following: existingHistory?.following ? { ...existingHistory.following } : {},
+    unfollowed_by_you: existingHistory?.unfollowed_by_you ? { ...existingHistory.unfollowed_by_you } : {},
+    close_friends: existingHistory?.close_friends ? { ...existingHistory.close_friends } : {},
+    blocked: existingHistory?.blocked ? { ...existingHistory.blocked } : {},
+    restricted: existingHistory?.restricted ? { ...existingHistory.restricted } : {},
+    pending_sent: existingHistory?.pending_sent ? { ...existingHistory.pending_sent } : {},
+    pending_received: existingHistory?.pending_received ? { ...existingHistory.pending_received } : {},
+    favorites: existingHistory?.favorites ? { ...existingHistory.favorites } : {},
+    all_known_users: existingHistory?.all_known_users ? { ...existingHistory.all_known_users } : {},
+    user_notes: existingHistory?.user_notes ? { ...existingHistory.user_notes } : {},
+    user_tags: existingHistory?.user_tags ? { ...existingHistory.user_tags } : {}
   };
 
   const contacts = backup.contacts || {};
@@ -625,75 +774,158 @@ export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, t
     const username = (contact.username || usernameKey).toLowerCase().trim();
     if (!username) continue;
 
-    const tags = Array.isArray(contact.tags) ? [...contact.tags] : [];
-    if (contact.is_missing && !tags.includes('manually_missing')) {
-      tags.push('manually_missing');
+    // Find any existing contact record across history collections
+    const existing = history.all_known_users?.[username] || 
+                     history.followers?.[username] || 
+                     history.following?.[username] || 
+                     history.unfollowed_by_you?.[username];
+
+    // Compare timestamps
+    const followedAt = earliestIsoTimestamp(existing?.followed_at, contact.followed_at);
+    const importedAt = earliestIsoTimestamp(existing?.imported_at, contact.imported_at || contact.followed_at || now);
+    const lastSeen = latestIsoTimestamp(existing?.last_seen, contact.last_seen || backup.last_updated || now) || now;
+
+    // Check if incoming contact record is newer than the existing record
+    const isContactNewer = !existing || isTimestampNewer(
+      contact.last_seen || backup.last_updated, 
+      existing.last_seen || existingHistory?.followers?.[username]?.last_seen
+    );
+
+    // Merge tags
+    const incomingTags = Array.isArray(contact.tags) ? [...contact.tags] : [];
+    if (contact.is_missing && !incomingTags.includes('manually_missing')) {
+      incomingTags.push('manually_missing');
     }
-    if (contact.is_manually_removed && !tags.includes('manually_removed')) {
-      tags.push('manually_removed');
+    if (contact.is_manually_removed && !incomingTags.includes('manually_removed')) {
+      incomingTags.push('manually_removed');
+    }
+    const mergedTags = Array.from(new Set([
+      ...(history.user_tags?.[username] || []),
+      ...(existing?.tags || []),
+      ...incomingTags
+    ]));
+
+    // Merge notes (never overwrite existing notes with blank)
+    const existingNote = (history.user_notes?.[username] || existing?.notes || '').trim();
+    const incomingNote = (contact.notes || '').trim();
+    let mergedNotes = existingNote;
+    if (!existingNote && incomingNote) {
+      mergedNotes = incomingNote;
+    } else if (existingNote && incomingNote && existingNote !== incomingNote) {
+      mergedNotes = isContactNewer 
+        ? `${incomingNote}\n[Previous Note]: ${existingNote}`
+        : `${existingNote}\n[Imported Note]: ${incomingNote}`;
     }
 
-    if (contact.notes) {
-      history.user_notes![username] = contact.notes;
+    if (mergedNotes) {
+      history.user_notes[username] = mergedNotes;
     }
-    if (tags.length > 0) {
-      history.user_tags![username] = tags;
+    if (mergedTags.length > 0) {
+      history.user_tags[username] = mergedTags;
+    }
+
+    // Merge timeline events deduplicated and chronologically sorted
+    const mergedEvents = mergeHistoryEvents(existing?.events || [], contact.events || []);
+
+    // Determine active flags based on whether incoming data is newer
+    let followsYou = isContactNewer 
+      ? Boolean(contact.follows_you) 
+      : Boolean(existing?.currently_following ?? contact.follows_you);
+
+    let youFollow = isContactNewer 
+      ? Boolean(contact.you_follow) 
+      : Boolean(existing?.currently_followed_by_you ?? contact.you_follow);
+
+    let isCloseFriend = isContactNewer ? Boolean(contact.is_close_friend) : Boolean(existing?.is_close_friend || contact.is_close_friend);
+    let isBlocked = isContactNewer ? Boolean(contact.is_blocked) : Boolean(existing?.is_blocked || contact.is_blocked);
+    let isRestricted = isContactNewer ? Boolean(contact.is_restricted) : Boolean(existing?.is_restricted || contact.is_restricted);
+    let isFavorite = isContactNewer ? Boolean(contact.is_favorite) : Boolean(existing?.is_favorite || contact.is_favorite);
+    let hasPendingSent = isContactNewer ? Boolean(contact.has_pending_request_sent) : Boolean(existing?.has_pending_request_sent || contact.has_pending_request_sent);
+    let hasPendingReceived = isContactNewer ? Boolean(contact.has_pending_request_received) : Boolean(existing?.has_pending_request_received || contact.has_pending_request_received);
+
+    let removalType = isContactNewer ? (contact.removal_type || null) : (existing?.removal_type || contact.removal_type || null);
+    let removedAt = isContactNewer ? (contact.removed_at || null) : (existing?.removed_at || contact.removed_at || null);
+
+    // If user is currently following in the newer state, clear removal flags
+    if (followsYou || youFollow) {
+      if (isContactNewer && !contact.removed_at) {
+        removalType = null;
+        removedAt = null;
+      }
     }
 
     const userRecord: UserRecord = {
       username,
-      followed_at: contact.followed_at || null,
-      imported_at: contact.imported_at || contact.followed_at || new Date().toISOString(),
-      added_at: contact.followed_at || contact.imported_at || new Date().toISOString(),
-      last_seen: contact.last_seen || new Date().toISOString(),
-      currently_following: Boolean(contact.follows_you),
-      currently_followed_by_you: Boolean(contact.you_follow),
-      removed_at: contact.removed_at || null,
-      removal_type: contact.removal_type || undefined,
-      is_close_friend: Boolean(contact.is_close_friend),
-      is_blocked: Boolean(contact.is_blocked),
-      is_restricted: Boolean(contact.is_restricted),
-      is_favorite: Boolean(contact.is_favorite),
-      has_pending_request_sent: Boolean(contact.has_pending_request_sent),
-      has_pending_request_received: Boolean(contact.has_pending_request_received),
-      notes: contact.notes || '',
-      tags,
-      events: Array.isArray(contact.events) ? contact.events : []
+      followed_at: followedAt,
+      imported_at: importedAt || now,
+      added_at: followedAt || importedAt || now,
+      last_seen: lastSeen,
+      currently_following: followsYou,
+      currently_followed_by_you: youFollow,
+      removed_at: removedAt,
+      removal_type: removalType || undefined,
+      is_close_friend: isCloseFriend,
+      is_blocked: isBlocked,
+      is_restricted: isRestricted,
+      is_favorite: isFavorite,
+      has_pending_request_sent: hasPendingSent,
+      has_pending_request_received: hasPendingReceived,
+      notes: mergedNotes,
+      tags: mergedTags,
+      events: mergedEvents
     };
 
-    history.all_known_users![username] = userRecord;
+    history.all_known_users[username] = userRecord;
 
-    if (contact.follows_you) {
+    // Synchronize into specific sub-collections
+    if (followsYou) {
       history.followers[username] = { ...userRecord, currently_following: true };
-    } else if (contact.removal_type === 'unfollowed_you' || (contact.removed_at && !contact.is_manually_removed)) {
+    } else if (removalType === 'unfollowed_you' || (removedAt && !mergedTags.includes('manually_removed'))) {
       history.followers[username] = { ...userRecord, currently_following: false };
     }
 
-    if (contact.you_follow) {
+    if (youFollow) {
       history.following[username] = { ...userRecord, currently_followed_by_you: true };
     }
 
-    if (contact.is_manually_removed || contact.removal_type === 'you_unfollowed' || contact.removal_type === 'removed_by_you') {
-      history.unfollowed_by_you![username] = { ...userRecord, currently_followed_by_you: false };
+    if (mergedTags.includes('manually_removed') || removalType === 'you_unfollowed' || removalType === 'removed_by_you') {
+      history.unfollowed_by_you[username] = { ...userRecord, currently_followed_by_you: false };
     }
 
-    if (contact.is_close_friend) {
-      history.close_friends![username] = userRecord;
+    if (isCloseFriend) {
+      history.close_friends[username] = userRecord;
+    } else {
+      delete history.close_friends[username];
     }
-    if (contact.is_blocked) {
-      history.blocked![username] = userRecord;
+
+    if (isBlocked) {
+      history.blocked[username] = userRecord;
+    } else {
+      delete history.blocked[username];
     }
-    if (contact.is_restricted) {
-      history.restricted![username] = userRecord;
+
+    if (isRestricted) {
+      history.restricted[username] = userRecord;
+    } else {
+      delete history.restricted[username];
     }
-    if (contact.has_pending_request_sent) {
-      history.pending_sent![username] = userRecord;
+
+    if (hasPendingSent) {
+      history.pending_sent[username] = userRecord;
+    } else {
+      delete history.pending_sent[username];
     }
-    if (contact.has_pending_request_received) {
-      history.pending_received![username] = userRecord;
+
+    if (hasPendingReceived) {
+      history.pending_received[username] = userRecord;
+    } else {
+      delete history.pending_received[username];
     }
-    if (contact.is_favorite) {
-      history.favorites![username] = userRecord;
+
+    if (isFavorite) {
+      history.favorites[username] = userRecord;
+    } else {
+      delete history.favorites[username];
     }
   }
 
@@ -701,7 +933,7 @@ export async function importUnifiedAccountBackup(backup: UnifiedAccountBackup, t
   return account;
 }
 
-// Export entire local JSON database across ALL accounts
+// Export entire local JSON database across ALL accounts (Human-readable formatted JSON)
 router.get('/database/export', async (req, res) => {
   try {
     const accounts = await getAccounts();
@@ -721,15 +953,18 @@ router.get('/database/export', async (req, res) => {
       accounts: accountBackups
     };
 
-    res.setHeader('Content-Type', 'application/json');
+    // Beautiful 2-space formatted human readable JSON
+    const formattedJson = JSON.stringify(payload, null, 2);
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="instagram_tracker_database_${new Date().toISOString().split('T')[0]}.json"`);
-    res.json(payload);
+    res.send(formattedJson);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Export single account database in unified single-record format
+// Export single account database in unified single-record format (Human-readable formatted JSON)
 router.get('/accounts/:id/export-database', async (req, res) => {
   try {
     const backup = await buildUnifiedAccountBackup(req.params.id);
@@ -744,9 +979,12 @@ router.get('/accounts/:id/export-database', async (req, res) => {
       account: backup
     };
 
-    res.setHeader('Content-Type', 'application/json');
+    // Beautiful 2-space formatted human readable JSON
+    const formattedJson = JSON.stringify(payload, null, 2);
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="instagram_${backup.name}_database_${new Date().toISOString().split('T')[0]}.json"`);
-    res.json(payload);
+    res.send(formattedJson);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
