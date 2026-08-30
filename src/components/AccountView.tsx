@@ -26,7 +26,8 @@ import {
   Trash2,
   FileQuestion,
   Database,
-  Download
+  Download,
+  Eye
 } from 'lucide-react';
 import { format } from 'date-fns';
 import ContactDetailModal from './ContactDetailModal';
@@ -275,6 +276,25 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
     } catch (err: any) {
       console.error(err);
       setStructuredError(err, 'Failed to update contact missing status');
+    } finally {
+      setActionLoadingUser(null);
+    }
+  };
+
+  const handleToggleSeen = async (e: React.MouseEvent, user: UserRecord) => {
+    e.stopPropagation();
+    const currentTags = user.tags || [];
+    const isSeen = currentTags.includes('seen');
+    const newTags = isSeen ? currentTags.filter(t => t !== 'seen') : [...currentTags, 'seen'];
+
+    setActionLoadingUser(user.username);
+    try {
+      await api.updateUserNotes(account.id, user.username, user.notes || '', newTags);
+      await fetchData();
+      onRefresh();
+    } catch (err: any) {
+      console.error(err);
+      setStructuredError(err, 'Failed to update seen status');
     } finally {
       setActionLoadingUser(null);
     }
@@ -829,6 +849,25 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
                             }
                           >
                             <FileQuestion className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={actionLoadingUser === user.username}
+                            onClick={(e) => handleToggleSeen(e, user)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                              user.tags?.includes('seen')
+                                ? 'bg-sky-100 hover:bg-sky-200 text-sky-900 border-sky-300'
+                                : 'bg-slate-50 hover:bg-sky-50 text-slate-700 hover:text-sky-700 border-slate-200 hover:border-sky-200'
+                            }`}
+                            title={
+                              user.tags?.includes('seen')
+                                ? 'Marked as Seen - Click to unmark'
+                                : 'Mark as Seen (Moves to bottom of Don\'t Follow Back list)'
+                            }
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>{user.tags?.includes('seen') ? 'Seen ✓' : 'Mark Seen'}</span>
                           </button>
 
                           <button

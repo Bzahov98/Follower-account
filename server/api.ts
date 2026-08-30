@@ -1822,7 +1822,12 @@ router.get('/accounts/:id/data', async (req, res) => {
 
   currentFollowers.sort(sortByUsername);
   currentFollowing.sort(sortByUsername);
-  nonFollowers.sort(sortByUsername);
+  nonFollowers.sort((a, b) => {
+    const aSeen = (a.tags || []).includes('seen') ? 1 : 0;
+    const bSeen = (b.tags || []).includes('seen') ? 1 : 0;
+    if (aSeen !== bSeen) return aSeen - bSeen; // unseen (0) before seen (1)
+    return a.username.localeCompare(b.username);
+  });
   unfollowers.sort(sortByRecentTime);
   youUnfollowed.sort(sortByRecentTime);
   mutuals.sort(sortByUsername);
