@@ -80,23 +80,51 @@ export default function App() {
         
         <div className="p-4 space-y-4">
           <div>
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-2">Active Profile</div>
-            {currentAccount ? (
-              <button 
-                onClick={() => setCurrentAccount(null)}
-                className="w-full flex items-center space-x-3 p-3 bg-blue-50/50 border border-blue-200 rounded-xl hover:bg-blue-100/60 transition-colors text-left group"
-              >
-                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 shrink-0 flex items-center justify-center text-white font-bold text-xs">
-                  {currentAccount.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="overflow-hidden">
-                  <p className="text-sm font-bold text-slate-900 truncate">@{currentAccount.name}</p>
-                  <p className="text-[10px] text-blue-600 font-medium group-hover:underline">← Switch Profile</p>
-                </div>
-              </button>
-            ) : (
+            <div className="flex items-center justify-between px-2 mb-2">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tracked Accounts ({accounts.length})</span>
+              {currentAccount && (
+                <button
+                  onClick={() => setCurrentAccount(null)}
+                  className="text-[10px] text-blue-600 hover:underline font-medium cursor-pointer"
+                >
+                  Dashboard
+                </button>
+              )}
+            </div>
+
+            {accounts.length === 0 ? (
               <div className="p-3 text-xs text-slate-400 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50">
-                No profile selected
+                No accounts tracked
+              </div>
+            ) : (
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
+                {accounts.map(acc => (
+                  <button
+                    key={acc.id}
+                    onClick={() => setCurrentAccount(acc)}
+                    className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs transition-colors text-left cursor-pointer ${
+                      currentAccount?.id === acc.id
+                        ? 'bg-blue-600 text-white font-bold shadow-xs'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <div className={`w-6 h-6 rounded-full shrink-0 flex items-center justify-center font-bold text-[10px] ${
+                        currentAccount?.id === acc.id ? 'bg-white text-blue-600' : 'bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 text-white'
+                      }`}>
+                        {acc.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="truncate">@{acc.name}</span>
+                    </div>
+                    {acc.stats && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-md shrink-0 ${
+                        currentAccount?.id === acc.id ? 'bg-blue-700 text-blue-100 font-mono' : 'bg-slate-200/70 text-slate-600 font-mono'
+                      }`}>
+                        {acc.stats.totalFollowers}
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -154,38 +182,7 @@ export default function App() {
       </aside>
 
       <main className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
-          <div className="flex items-center space-x-4">
-            <h2 className="text-lg font-semibold">{currentAccount ? `Profile: @${currentAccount.name}` : 'Project Dashboard'}</h2>
-            {currentAccount && (
-              <>
-                <div className="h-4 w-[1px] bg-slate-300"></div>
-                <span className="text-xs text-slate-500 font-mono">data/account_{currentAccount.id}_history.json</span>
-              </>
-            )}
-          </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              id="header-clear-data-btn"
-              onClick={() => setIsClearDataOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-red-700 hover:bg-red-50 text-xs font-semibold rounded-lg border border-slate-200 hover:border-red-200 transition-colors cursor-pointer"
-              title="Clear or wipe local data"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-red-500" />
-              Clear Local Data
-            </button>
-
-            <button
-              id="header-open-guide-btn"
-              onClick={() => setIsGuideOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg border border-blue-200 transition-colors cursor-pointer"
-            >
-              <HelpCircle className="w-3.5 h-3.5" />
-              How to Export Data
-            </button>
-          </div>
-        </header>
 
         <section className="flex-1 overflow-y-auto p-8 flex flex-col min-h-0">
           {!currentAccount ? (

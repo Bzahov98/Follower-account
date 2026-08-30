@@ -540,6 +540,15 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
                   active={activeTab === 'following'}
                 />
                 <StatCard 
+                  label="Mutuals" 
+                  value={stats.mutuals} 
+                  icon={Users} 
+                  color="blue" 
+                  subtitle="Mutual friends" 
+                  onClick={() => setActiveTab('mutuals')}
+                  active={activeTab === 'mutuals'}
+                />
+                <StatCard 
                   label="Non-Followers" 
                   value={stats.nonFollowers} 
                   icon={UserX} 
@@ -641,6 +650,24 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
             {/* Category Navigation Tabs */}
             <div className="flex overflow-x-auto border-b border-slate-100 hide-scrollbar bg-white shrink-0">
               <Tab 
+                id="followers" 
+                label={`Followers (${stats.totalFollowers})`} 
+                active={activeTab} 
+                onClick={setActiveTab} 
+              />
+              <Tab 
+                id="following" 
+                label={`Following (${stats.totalFollowing})`} 
+                active={activeTab} 
+                onClick={setActiveTab} 
+              />
+              <Tab 
+                id="mutuals" 
+                label={`Mutuals (${stats.mutuals})`} 
+                active={activeTab} 
+                onClick={setActiveTab} 
+              />
+              <Tab 
                 id="non-followers" 
                 label={`Don't Follow Back (${stats.nonFollowers})`} 
                 active={activeTab} 
@@ -667,24 +694,6 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
               <Tab 
                 id="all-contacts" 
                 label={`All History Archive (${stats.allKnownContacts || (lists.allContacts || []).length})`} 
-                active={activeTab} 
-                onClick={setActiveTab} 
-              />
-              <Tab 
-                id="mutuals" 
-                label={`Mutuals (${stats.mutuals})`} 
-                active={activeTab} 
-                onClick={setActiveTab} 
-              />
-              <Tab 
-                id="followers" 
-                label={`Followers (${stats.totalFollowers})`} 
-                active={activeTab} 
-                onClick={setActiveTab} 
-              />
-              <Tab 
-                id="following" 
-                label={`Following (${stats.totalFollowing})`} 
                 active={activeTab} 
                 onClick={setActiveTab} 
               />
