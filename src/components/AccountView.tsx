@@ -66,6 +66,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isImportDbOpen, setIsImportDbOpen] = useState(false);
   const [actionLoadingUser, setActionLoadingUser] = useState<string | null>(null);
+  const [statsFolded, setStatsFolded] = useState(false);
 
   const folderInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -504,70 +505,87 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
       ) : stats && (stats.totalFollowers > 0 || stats.totalFollowing > 0 || stats.unfollowers > 0 || stats.youUnfollowed > 0) ? (
         <>
           {/* Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
-            <StatCard 
-              label="Followers" 
-              value={stats.totalFollowers} 
-              icon={Users} 
-              color="blue" 
-              subtitle="Follows you" 
-              onClick={() => setActiveTab('followers')}
-              active={activeTab === 'followers'}
-            />
-            <StatCard 
-              label="Following" 
-              value={stats.totalFollowing} 
-              icon={Users} 
-              color="green" 
-              subtitle="You follow" 
-              onClick={() => setActiveTab('following')}
-              active={activeTab === 'following'}
-            />
-            <StatCard 
-              label="Non-Followers" 
-              value={stats.nonFollowers} 
-              icon={UserX} 
-              color="red" 
-              subtitle="Don't follow back" 
-              onClick={() => setActiveTab('non-followers')}
-              active={activeTab === 'non-followers'}
-            />
-            <StatCard 
-              label="Unfollowers" 
-              value={stats.unfollowers} 
-              icon={UserMinus} 
-              color="orange" 
-              subtitle="Lost followers" 
-              onClick={() => setActiveTab('unfollowers')}
-              active={activeTab === 'unfollowers'}
-            />
-            <StatCard 
-              label="You Removed" 
-              value={stats.youUnfollowed || (lists.youUnfollowed || []).length} 
-              icon={UserX} 
-              color="amber" 
-              subtitle="Kept in archive" 
-              onClick={() => setActiveTab('you-unfollowed')}
-              active={activeTab === 'you-unfollowed'}
-            />
-            <StatCard 
-              label="Missing" 
-              value={stats.missingCount || (lists.missing || []).length} 
-              icon={FileQuestion} 
-              color="purple" 
-              subtitle="Marked missing" 
-              onClick={() => setActiveTab('missing')}
-              active={activeTab === 'missing'}
-            />
-            <StatCard 
-              label="All Contacts" 
-              value={stats.allKnownContacts || (lists.allContacts || []).length} 
-              icon={Archive} 
-              color="purple" 
-              subtitle="Master directory" 
-              onClick={() => setActiveTab('all-contacts')}
-              active={activeTab === 'all-contacts'}
-            />
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 shrink-0">
+            <div className="flex items-center justify-between mb-2 px-1">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-indigo-600" />
+                Overview Statistics
+              </span>
+              <button
+                onClick={() => setStatsFolded(!statsFolded)}
+                className="text-xs text-slate-500 hover:text-slate-800 font-medium cursor-pointer px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                {statsFolded ? 'Expand Statistics (+)' : 'Fold Statistics (—)'}
+              </button>
+            </div>
+            
+            {!statsFolded && (
+              <div className="flex flex-row items-center gap-3 overflow-x-auto pb-2 pt-1 scrollbar-thin">
+                <StatCard 
+                  label="Followers" 
+                  value={stats.totalFollowers} 
+                  icon={Users} 
+                  color="blue" 
+                  subtitle="Follows you" 
+                  onClick={() => setActiveTab('followers')}
+                  active={activeTab === 'followers'}
+                />
+                <StatCard 
+                  label="Following" 
+                  value={stats.totalFollowing} 
+                  icon={Users} 
+                  color="green" 
+                  subtitle="You follow" 
+                  onClick={() => setActiveTab('following')}
+                  active={activeTab === 'following'}
+                />
+                <StatCard 
+                  label="Non-Followers" 
+                  value={stats.nonFollowers} 
+                  icon={UserX} 
+                  color="red" 
+                  subtitle="Don't follow back" 
+                  onClick={() => setActiveTab('non-followers')}
+                  active={activeTab === 'non-followers'}
+                />
+                <StatCard 
+                  label="Unfollowers" 
+                  value={stats.unfollowers} 
+                  icon={UserMinus} 
+                  color="orange" 
+                  subtitle="Lost followers" 
+                  onClick={() => setActiveTab('unfollowers')}
+                  active={activeTab === 'unfollowers'}
+                />
+                <StatCard 
+                  label="You Removed" 
+                  value={stats.youUnfollowed || (lists.youUnfollowed || []).length} 
+                  icon={UserX} 
+                  color="amber" 
+                  subtitle="Kept in archive" 
+                  onClick={() => setActiveTab('you-unfollowed')}
+                  active={activeTab === 'you-unfollowed'}
+                />
+                <StatCard 
+                  label="Missing" 
+                  value={stats.missingCount || (lists.missing || []).length} 
+                  icon={FileQuestion} 
+                  color="purple" 
+                  subtitle="Marked missing" 
+                  onClick={() => setActiveTab('missing')}
+                  active={activeTab === 'missing'}
+                />
+                <StatCard 
+                  label="All Contacts" 
+                  value={stats.allKnownContacts || (lists.allContacts || []).length} 
+                  icon={Archive} 
+                  color="purple" 
+                  subtitle="Master directory" 
+                  onClick={() => setActiveTab('all-contacts')}
+                  active={activeTab === 'all-contacts'}
+                />
+              </div>
+            )}
           </div>
 
           {/* Detailed Relationship & History Directory */}
@@ -942,7 +960,7 @@ function StatCard({
   return (
     <div 
       onClick={onClick}
-      className={`bg-white p-3.5 rounded-xl border transition-all cursor-pointer shadow-xs flex flex-col justify-between ${
+      className={`bg-white p-3.5 rounded-xl border transition-all cursor-pointer shadow-xs flex flex-col justify-between min-w-[170px] sm:min-w-[190px] shrink-0 ${
         active 
           ? 'ring-2 ring-blue-500 border-blue-500 bg-blue-50/20' 
           : 'border-slate-200 hover:border-slate-300 hover:shadow-sm'
