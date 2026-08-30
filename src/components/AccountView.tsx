@@ -1017,6 +1017,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
         user={selectedContact}
         accountId={account.id}
         onUpdate={fetchData}
+        allTags={allUniqueTags}
       />
 
       {/* Database Import Modal */}

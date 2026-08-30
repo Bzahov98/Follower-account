@@ -29,6 +29,7 @@ interface ContactDetailModalProps {
   user: UserRecord | null;
   accountId: string;
   onUpdate: () => void;
+  allTags: string[];
 }
 
 export default function ContactDetailModal({
@@ -36,7 +37,8 @@ export default function ContactDetailModal({
   onClose,
   user,
   accountId,
-  onUpdate
+  onUpdate,
+  allTags
 }: ContactDetailModalProps) {
   const [notes, setNotes] = useState('');
   const [tags, setTags] = useState<string[]>([]);
@@ -56,32 +58,41 @@ export default function ContactDetailModal({
 
   if (!isOpen || !user) return null;
 
-  const handleSaveNotes = async () => {
+  const handleSaveNotes = async (currentTags = tags) => {
     setSaving(true);
     try {
-      await api.updateUserNotes(accountId, user.username, notes, tags);
+      await api.updateUserNotes(accountId, user.username, notes, currentTags);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2000);
       onUpdate();
+      return true;
     } catch (err) {
       console.error('Failed to save notes:', err);
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const handleAddTag = (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = newTag.trim().toLowerCase().replace(/^#/, '');
+  const addTag = async (tag: string) => {
+    const clean = tag.trim().toLowerCase().replace(/^#/, '');
     if (clean && !tags.includes(clean)) {
-      const updated = [...tags, clean];
+      const updated = [clean, ...tags];
       setTags(updated);
       setNewTag('');
+      await handleSaveNotes(updated);
     }
   };
 
-  const handleRemoveTag = (tagToRemove: string) => {
-    setTags(tags.filter(t => t !== tagToRemove));
+  const handleAddTag = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await addTag(newTag);
+  };
+
+  const handleRemoveTag = async (tagToRemove: string) => {
+    const updated = tags.filter(t => t !== tagToRemove);
+    setTags(updated);
+    await handleSaveNotes(updated);
   };
 
   const handleToggleManualRemovalModal = async () => {
@@ -299,6 +310,8 @@ export default function ContactDetailModal({
               <Tag className="w-3.5 h-3.5 text-purple-600" />
               Contact Tags
             </label>
+            
+            {/* Added Tags */}
             <div className="flex flex-wrap gap-1.5 items-center">
               {tags.map(tag => (
                 <span key={tag} className="px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-md text-xs font-medium flex items-center gap-1">
@@ -312,21 +325,45 @@ export default function ContactDetailModal({
                   </button>
                 </span>
               ))}
+            </div>
+
+            {/* Tag Input & Suggestions */}
+            <div className="flex flex-wrap gap-2 items-center">
               <form onSubmit={handleAddTag} className="flex items-center gap-1">
                 <input
                   type="text"
                   value={newTag}
                   onChange={(e) => setNewTag(e.target.value)}
-                  placeholder="+ Add tag (e.g. friend, lead)"
-                  className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-700 placeholder:text-slate-400 focus:ring-1 focus:ring-purple-500 w-36"
+                  placeholder="+ Add new tag"
+                  className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-700 placeholder:text-slate-400 focus:ring-1 focus:ring-purple-500 w-32"
                 />
-                <button
-                  type="submit"
-                  className="p-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 text-xs"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
               </form>
+
+              {/* Suggestions */}
+              {allTags.filter(t => !tags.includes(t)).slice(0, 5).map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => addTag(tag)}
+                  className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-300 hover:border-purple-300 rounded-md text-xs font-medium transition-colors"
+                >
+                  +{tag}
+                </button>
+              ))}
+
+              {/* More Suggestions Dropdown */}
+              {allTags.filter(t => !tags.includes(t)).length > 5 && (
+                <select
+                  onChange={(e) => addTag(e.target.value)}
+                  value=""
+                  className="bg-slate-100 border-none rounded-md text-xs text-slate-600 py-1 px-2 cursor-pointer"
+                >
+                  <option value="" disabled>More...</option>
+                  {allTags.filter(t => !tags.includes(t)).slice(5).map(tag => (
+                    <option key={tag} value={tag}>{tag}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
 
