@@ -339,24 +339,30 @@ export default function ContactDetailModal({
                 />
               </form>
 
-              {/* Suggestions */}
-              {allTags.filter(t => !tags.includes(t)).slice(0, 5).map(tag => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => addTag(tag)}
-                  className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-300 hover:border-purple-300 rounded-md text-xs font-medium transition-colors"
-                >
-                  +{tag}
-                </button>
-              ))}
+              {/* Suggestions: Only show tags that are NOT already added to the user */}
+              {allTags
+                .filter(t => !tags.includes(t))
+                .slice(0, 5)
+                .map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => addTag(tag)}
+                    className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-300 hover:border-purple-300 rounded-md text-xs font-medium transition-colors"
+                  >
+                    +{tag}
+                  </button>
+                ))}
 
               {/* More Suggestions Dropdown */}
               {allTags.filter(t => !tags.includes(t)).length > 5 && (
                 <select
-                  onChange={(e) => addTag(e.target.value)}
+                  onChange={(e) => {
+                    if (e.target.value) addTag(e.target.value);
+                    e.target.value = ""; // Reset select
+                  }}
                   value=""
-                  className="bg-slate-100 border-none rounded-md text-xs text-slate-600 py-1 px-2 cursor-pointer"
+                  className="bg-slate-100 border border-slate-200 rounded-md text-xs text-slate-600 py-1 px-2 cursor-pointer"
                 >
                   <option value="" disabled>More...</option>
                   {allTags.filter(t => !tags.includes(t)).slice(5).map(tag => (

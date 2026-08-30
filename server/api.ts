@@ -1544,6 +1544,13 @@ router.post('/accounts/:id/contacts/:username/notes', async (req, res) => {
     }
     if (Array.isArray(tags)) {
       history.user_tags[username] = tags;
+      // Update global tags registry
+      if (!history.all_known_tags) history.all_known_tags = [];
+      tags.forEach(tag => {
+        if (!history.all_known_tags!.includes(tag)) {
+          history.all_known_tags!.push(tag);
+        }
+      });
     }
 
     // Update in all lists if present
@@ -1866,7 +1873,8 @@ router.get('/accounts/:id/data', async (req, res) => {
       pendingReceived,
       missing,
       allHistory
-    }
+    },
+    allTags: history.all_known_tags || []
   });
 });
 

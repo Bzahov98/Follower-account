@@ -63,6 +63,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('all');
+  const [allUniqueTags, setAllUniqueTags] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<'followed_at' | 'username'>('username');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [filterRemoved, setFilterRemoved] = useState<'all' | 'removed' | 'not_removed'>('all');
@@ -107,6 +108,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
       const data = await api.getAccountData(account.id);
       setStats(data.stats);
       setLists(data.lists);
+      setAllUniqueTags(data.allTags);
     } catch (err) {
       console.error(err);
       setStructuredError(err, 'Failed to load account data.');
@@ -320,13 +322,6 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
   };
 
   const rawActiveList = getActiveList();
-
-  // Extract all unique tags across current account contacts
-  const allUniqueTags = Array.from(
-    new Set(
-      (lists.allContacts || []).flatMap(u => u.tags || [])
-    )
-  );
 
   // Apply Search, Tag, Removed, Seen Filter & Sort
   const filteredList = rawActiveList.filter(user => {
