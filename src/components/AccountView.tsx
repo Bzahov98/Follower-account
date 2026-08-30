@@ -63,6 +63,11 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'followed_at' | 'username'>('username');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [filterRemoved, setFilterRemoved] = useState<'all' | 'removed' | 'not_removed'>('all');
+  const [filterSeen, setFilterSeen] = useState<'all' | 'seen' | 'not_seen'>('all');
+  
   const [selectedContact, setSelectedContact] = useState<UserRecord | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isImportDbOpen, setIsImportDbOpen] = useState(false);
@@ -323,7 +328,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
     )
   );
 
-  // Apply Search & Tag Filter
+  // Apply Search, Tag, Removed, Seen Filter & Sort
   const filteredList = rawActiveList.filter(user => {
     const matchesSearch = searchQuery === '' || 
       user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -331,8 +336,26 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
     
     const matchesTag = selectedTagFilter === 'all' ||
       (user.tags && user.tags.includes(selectedTagFilter));
+    
+    const isManuallyRemoved = (user.tags || []).includes('manually_removed') || user.removal_type === 'you_unfollowed';
+    const matchesRemoved = filterRemoved === 'all' || 
+                           (filterRemoved === 'removed' ? isManuallyRemoved : !isManuallyRemoved);
+    
+    const isSeen = (user.tags || []).includes('seen');
+    const matchesSeen = filterSeen === 'all' || 
+                        (filterSeen === 'seen' ? isSeen : !isSeen);
 
-    return matchesSearch && matchesTag;
+    return matchesSearch && matchesTag && matchesRemoved && matchesSeen;
+  }).sort((a, b) => {
+    let comparison = 0;
+    if (sortBy === 'followed_at') {
+      const aDate = a.followed_at ? new Date(a.followed_at).getTime() : 0;
+      const bDate = b.followed_at ? new Date(b.followed_at).getTime() : 0;
+      comparison = aDate - bDate;
+    } else {
+      comparison = a.username.localeCompare(b.username);
+    }
+    return sortOrder === 'asc' ? comparison : -comparison;
   });
 
   return (
@@ -622,13 +645,13 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
             {/* Header with Search and Filter */}
             <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shrink-0 bg-slate-50/50">
               <div className="flex items-center gap-2">
-                <div className="relative w-64">
+                <div className="relative w-48">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search username or notes..."
+                    placeholder="Search..."
                     className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:ring-1 focus:ring-blue-500"
                   />
                   {searchQuery && (
@@ -641,21 +664,47 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
                   )}
                 </div>
 
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as any)}
+                  className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700"
+                >
+                  <option value="username">Sort: Username</option>
+                  <option value="followed_at">Sort: Follow Date</option>
+                </select>
+                
+                <button
+                  onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                  className="p-1.5 bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50"
+                  title="Toggle Sort Order"
+                >
+                   {sortOrder === 'asc' ? '↑' : '↓'}
+                </button>
+
                 {allUniqueTags.length > 0 && (
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <Filter className="w-3 h-3 text-slate-400" />
-                    <select
-                      value={selectedTagFilter}
-                      onChange={(e) => setSelectedTagFilter(e.target.value)}
-                      className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium"
-                    >
-                      <option value="all">All Tags</option>
-                      {allUniqueTags.map(t => (
-                        <option key={t} value={t}>#{t}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <select
+                    value={selectedTagFilter}
+                    onChange={(e) => setSelectedTagFilter(e.target.value)}
+                    className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700"
+                  >
+                    <option value="all">Tags: All</option>
+                    {allUniqueTags.map(t => (
+                      <option key={t} value={t}>#{t}</option>
+                    ))}
+                  </select>
                 )}
+
+                <select value={filterRemoved} onChange={(e) => setFilterRemoved(e.target.value as any)} className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700">
+                  <option value="all">Removed: All</option>
+                  <option value="removed">Removed: Only</option>
+                  <option value="not_removed">Removed: None</option>
+                </select>
+
+                <select value={filterSeen} onChange={(e) => setFilterSeen(e.target.value as any)} className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700">
+                  <option value="all">Seen: All</option>
+                  <option value="seen">Seen: Only</option>
+                  <option value="not_seen">Seen: None</option>
+                </select>
               </div>
 
               <div className="text-xs text-slate-500 font-medium flex items-center gap-2">
