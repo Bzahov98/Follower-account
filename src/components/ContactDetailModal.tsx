@@ -358,14 +358,21 @@ export default function ContactDetailModal({
               onClick={handleToggleManualRemovalModal}
               className={`px-3 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 ${
                 tags.includes('manually_removed') || user.removal_type === 'you_unfollowed'
-                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
+                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
                   : 'bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 border-slate-200 hover:border-red-200'
               }`}
             >
-              <UserMinus className="w-3.5 h-3.5" />
-              {tags.includes('manually_removed') || user.removal_type === 'you_unfollowed'
-                ? 'Marked as Removed (#manually_removed)'
-                : 'Mark as Manually Removed'}
+              {tags.includes('manually_removed') || user.removal_type === 'you_unfollowed' ? (
+                <>
+                  <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  Restore Account (Reverse Remove)
+                </>
+              ) : (
+                <>
+                  <UserMinus className="w-3.5 h-3.5 text-red-600" />
+                  Mark as Manually Removed
+                </>
+              )}
             </button>
 
             <button

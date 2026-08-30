@@ -783,19 +783,23 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
                             onClick={(e) => handleToggleManualRemove(e, user)}
                             className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors border flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
                               user.tags?.includes('manually_removed') || user.removal_type === 'you_unfollowed'
-                                ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
+                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
                                 : 'bg-slate-50 hover:bg-red-50 text-slate-700 hover:text-red-700 border-slate-200 hover:border-red-200'
                             }`}
                             title={
                               user.tags?.includes('manually_removed') || user.removal_type === 'you_unfollowed'
-                                ? 'Click to unmark manual removal'
+                                ? 'Click to restore account / reverse remove'
                                 : 'Mark that you manually unfollowed / removed this account (#manually_removed)'
                             }
                           >
-                            <UserMinus className="w-3.5 h-3.5" />
+                            {user.tags?.includes('manually_removed') || user.removal_type === 'you_unfollowed' ? (
+                              <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : (
+                              <UserMinus className="w-3.5 h-3.5" />
+                            )}
                             <span>
                               {user.tags?.includes('manually_removed') || user.removal_type === 'you_unfollowed'
-                                ? 'Manually Removed ✓'
+                                ? 'Restore Account'
                                 : 'Mark Removed'}
                             </span>
                           </button>
@@ -825,7 +829,7 @@ export default function AccountView({ account, onRefresh, onOpenGuide, onOpenCle
                             }}
                             className="text-xs text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer"
                           >
-                            Details / Notes
+                            Details
                           </button>
                           
                           <a

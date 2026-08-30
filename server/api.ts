@@ -1587,18 +1587,50 @@ router.post('/accounts/:id/contacts/:username/manual-remove', async (req, res) =
     const isCurrentlyMarked = existingTags.includes('manually_removed') || (history.unfollowed_by_you[username] && history.unfollowed_by_you[username].removal_type === 'you_unfollowed');
 
     if (action === 'unmark' || (action === undefined && isCurrentlyMarked)) {
-      // Unmark manual removal: restore tags
+      // Unmark manual removal: fully restore account
       history.user_tags[username] = existingTags.filter(t => t !== 'manually_removed');
       delete history.unfollowed_by_you[username];
 
       if (history.following[username]) {
         history.following[username].currently_followed_by_you = true;
         history.following[username].removed_at = null;
+        history.following[username].removal_type = undefined;
         history.following[username].tags = history.user_tags[username];
+        if (!history.following[username].events) history.following[username].events = [];
+        history.following[username].events!.push({
+          type: 'you_followed',
+          timestamp: now,
+          description: 'Restored / Remove reversed by you'
+        });
+      } else {
+        const existingRec = history.all_known_users?.[username] || {
+          username,
+          added_at: now,
+          imported_at: now,
+          last_seen: now,
+          currently_following: false
+        };
+        history.following[username] = {
+          ...existingRec,
+          currently_followed_by_you: true,
+          removed_at: null,
+          removal_type: undefined,
+          tags: history.user_tags[username],
+          events: [
+            ...((existingRec as UserRecord).events || []),
+            {
+              type: 'you_followed',
+              timestamp: now,
+              description: 'Restored / Remove reversed by you'
+            }
+          ]
+        };
       }
+
       if (history.all_known_users[username]) {
-        history.all_known_users[username].currently_followed_by_you = !!history.following[username];
+        history.all_known_users[username].currently_followed_by_you = true;
         history.all_known_users[username].removed_at = null;
+        history.all_known_users[username].removal_type = undefined;
         history.all_known_users[username].tags = history.user_tags[username];
       }
     } else {
